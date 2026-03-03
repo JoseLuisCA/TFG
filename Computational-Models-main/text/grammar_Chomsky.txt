@@ -1,0 +1,6 @@
+V = {S,A,B}
+T = {a,b}
+
+S -> bA|aB
+A -> bAA|AS|a
+B -> aBB|bS|b

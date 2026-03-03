@@ -1,0 +1,4 @@
+V = {S}
+T = {a,b,c}
+
+S -> aSb|cSb|a

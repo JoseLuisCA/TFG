@@ -1,0 +1,6 @@
+V = {S,A,C}
+T = {e,g,i,o}
+
+S -> gAe
+A -> ooC
+C -> gi

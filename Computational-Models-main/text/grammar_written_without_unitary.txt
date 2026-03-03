@@ -1,0 +1,6 @@
+V = {S,A,B}
+T = {a,b,c,d}
+
+S -> aBc|aAb|cd|ccBS|dc
+A -> aAb|cd|ccBS|dc
+B -> ccBS|dc

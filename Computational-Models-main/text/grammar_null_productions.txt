@@ -1,0 +1,7 @@
+V = {S,A,B,C}
+T = {a,b}
+
+S -> ABb|ABC
+A -> aA|
+B -> bB|
+C -> abC|AB

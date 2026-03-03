@@ -1,0 +1,6 @@
+V = {S,D,E,F}
+T = {a,b,c}
+
+S -> aSb|bcD|cSE
+E -> aDb|abF
+F -> abc

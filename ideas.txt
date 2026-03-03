@@ -1,0 +1,7 @@
+Ideas para el TFG:
+
+- Aceptar lenguaje natural para generar automatas y otras funcionalidades, implementar IA?
+
+- Aplicación estilo scratch para "jugar" y "experimentar" con autómatas.
+
+- Simplemente hacer una "copia" de jflap en python, añadiendo alguna funcionalidad o hacerla más intuitiva, más atravctiva visualmente, ....

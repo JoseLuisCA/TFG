@@ -1,0 +1,13 @@
+V = {S,A,B,C,D,U,W,X,Y,Z}
+T = {a,b,c,d,e,f,g,h,i,j,k,m,n,o}
+
+S -> gAe|aYB|cY
+A -> bBY|ooC
+B -> dd|D
+C -> jZB|gi
+D -> n
+U -> kW
+Z -> baXXX|oZ
+W -> c
+X -> fZ
+Y -> Yhm
