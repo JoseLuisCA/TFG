@@ -553,7 +553,7 @@ class FiniteAutomaton:
     states  if it is final, and the state is finally removed from the list.  """
     
     def __delete_state(self, state):
-        i = 0;
+        i = 0
         transitions = self.getTransitionFunction()
         final_states = self.getFinalStates()
         
