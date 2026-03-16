@@ -14,6 +14,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QPushButton,
@@ -221,13 +222,21 @@ class WorkspaceCanvas(QWidget):
             self.update()
             return
 
-        if self._pending_connection_start is circle:
-            self._pending_connection_start = None
-            self.update()
-            return
-
         if not self._has_connection(self._pending_connection_start, circle):
-            self._connections.append((self._pending_connection_start, circle))
+            symbols, ok = QInputDialog.getText(
+                self,
+                "Nueva transicion",
+                "Introduce los simbolos de la transicion separados por una coma. (a,b,c,d)",
+            )
+            if ok:
+                normalized_symbols = self._normalize_symbols(symbols)
+                self._connections.append(
+                    {
+                        "start": self._pending_connection_start,
+                        "end": circle,
+                        "symbols": normalized_symbols,
+                    }
+                )
         self._pending_connection_start = None
         self.update()
 
@@ -240,10 +249,13 @@ class WorkspaceCanvas(QWidget):
         painter.setPen(pen)
         painter.setBrush(QColor("#1f2937"))
 
-        for start_circle, end_circle in self._connections:
+        for connection in self._connections:
+            start_circle = connection["start"]
+            end_circle = connection["end"]
+            symbols = connection["symbols"]
             has_reverse = self._has_connection(end_circle, start_circle)
             curve_sign = 1.0 if has_reverse else 0.0
-            self._draw_arrow(painter, start_circle, end_circle, curve_sign)
+            self._draw_arrow(painter, start_circle, end_circle, curve_sign, symbols)
 
         if self._active_tool == "arrow" and self._pending_connection_start is not None:
             highlight_pen = QPen(QColor("#2563eb"), 2)
@@ -257,7 +269,12 @@ class WorkspaceCanvas(QWidget):
         start_circle: "MovableCircle",
         end_circle: "MovableCircle",
         curve_sign: float,
+        symbols: str,
     ) -> None:
+        if start_circle is end_circle:
+            self._draw_self_loop(painter, start_circle, symbols)
+            return
+
         start_center = self._circle_center(start_circle)
         end_center = self._circle_center(end_circle)
 
@@ -334,6 +351,94 @@ class WorkspaceCanvas(QWidget):
         painter.setBrush(QColor("#1f2937"))
         painter.drawPolygon(QPolygonF([line_end, arrow_p1, arrow_p2]))
 
+        if symbols:
+            text_anchor = control_point if curve_sign != 0.0 else QPointF(
+                (line_start.x() + line_end.x()) / 2.0,
+                (line_start.y() + line_end.y()) / 2.0,
+            )
+            text_offset = 18.0 if curve_sign == 0.0 else 14.0
+            text_pos = QPointF(
+                text_anchor.x() + perpendicular_x * text_offset,
+                text_anchor.y() + perpendicular_y * text_offset,
+            )
+
+            # Solo para rectas: forzamos que la etiqueta quede por encima.
+            if curve_sign == 0.0:
+                if text_pos.y() >= text_anchor.y():
+                    text_pos = QPointF(
+                        text_anchor.x() - perpendicular_x * text_offset,
+                        text_anchor.y() - perpendicular_y * text_offset,
+                    )
+
+                if abs(perpendicular_y) < 0.2:
+                    text_pos = QPointF(text_pos.x(), text_pos.y() - 10.0)
+
+            font = painter.font()
+            font.setPointSize(10)
+            font.setBold(True)
+            painter.setFont(font)
+
+            metrics = painter.fontMetrics()
+            text_width = metrics.horizontalAdvance(symbols)
+            text_height = metrics.height()
+
+            painter.setPen(QColor("#111827"))
+            painter.drawText(
+                QPointF(text_pos.x() - text_width / 2.0, text_pos.y() - text_height / 2.0),
+                symbols,
+            )
+
+    def _draw_self_loop(self, painter: QPainter, circle: "MovableCircle", symbols: str) -> None:
+        center = self._circle_center(circle)
+        radius = min(circle.width(), circle.height()) / 2.0
+
+        # Loop más largo con curvatura predominante hacia arriba (vertical superior).
+        start = QPointF(center.x() + radius * 0.05, center.y() - radius * 0.95)
+        end = QPointF(center.x() + radius * 1.0, center.y() - radius * 0.55)
+        ctrl1 = QPointF(center.x() + radius * 0.15, center.y() - radius * 2.9)
+        ctrl2 = QPointF(center.x() + radius * 2.25, center.y() - radius * 2.35)
+
+        path = QPainterPath(start)
+        path.cubicTo(ctrl1, ctrl2, end)
+
+        painter.setPen(QPen(QColor("#1f2937"), 2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(path)
+
+        # Punta de flecha orientada por la tangente final de la curva.
+        tangent_x = end.x() - ctrl2.x()
+        tangent_y = end.y() - ctrl2.y()
+        angle = math.atan2(tangent_y, tangent_x)
+        arrow_size = 10.0
+        arrow_p1 = QPointF(
+            end.x() - arrow_size * math.cos(angle - math.pi / 6.0),
+            end.y() - arrow_size * math.sin(angle - math.pi / 6.0),
+        )
+        arrow_p2 = QPointF(
+            end.x() - arrow_size * math.cos(angle + math.pi / 6.0),
+            end.y() - arrow_size * math.sin(angle + math.pi / 6.0),
+        )
+        painter.setBrush(QColor("#1f2937"))
+        painter.drawPolygon(QPolygonF([end, arrow_p1, arrow_p2]))
+
+        if symbols:
+            label_x = center.x() + radius * 1.1
+            label_y = center.y() - radius * 2.25
+
+            font = painter.font()
+            font.setPointSize(10)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.setPen(QColor("#111827"))
+
+            metrics = painter.fontMetrics()
+            text_width = metrics.horizontalAdvance(symbols)
+            text_height = metrics.height()
+            painter.drawText(
+                QPointF(label_x - text_width / 2.0, label_y - text_height / 2.0),
+                symbols,
+            )
+
     def _circle_center(self, circle: "MovableCircle") -> QPointF:
         return QPointF(circle.x() + circle.width() / 2.0, circle.y() + circle.height() / 2.0)
 
@@ -341,10 +446,14 @@ class WorkspaceCanvas(QWidget):
         return circle.geometry()
 
     def _has_connection(self, start_circle: "MovableCircle", end_circle: "MovableCircle") -> bool:
-        for existing_start, existing_end in self._connections:
-            if existing_start is start_circle and existing_end is end_circle:
+        for connection in self._connections:
+            if connection["start"] is start_circle and connection["end"] is end_circle:
                 return True
         return False
+
+    def _normalize_symbols(self, symbols: str) -> str:
+        items = [item.strip() for item in symbols.split(",") if item.strip()]
+        return ",".join(items)
 
 #Aquí se define que el círculo que se ha creado en el espacio de trabajo se pueda mover arrastrándolo con el mouse, pero sin salir de los límites del espacio de trabajo.
 class MovableCircle(QLabel):
