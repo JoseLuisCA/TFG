@@ -14,8 +14,8 @@ from grammar import GenerativeGrammar
 path_file = "text/automaton_example.txt"
 automaton = FiniteAutomaton.readAutomaton(path_file)
 print(automaton)
-path_transition_diagram = "transition_diagram"
-automaton.showAutomaton(path_transition_diagram)
+# path_transition_diagram = "transition_diagram"
+# automaton.showAutomaton(path_transition_diagram)
 word = "011"
 belonging = automaton.wordBelongs(word)
 print("La palabra", word, "pertenece al lenguaje del autómata:", belonging)

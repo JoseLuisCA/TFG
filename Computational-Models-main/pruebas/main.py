@@ -1,4 +1,4 @@
-from PySide6.QtGui import QDrag, QFont
+from PySide6.QtGui import QDrag, QFont, QIcon, QPalette, QColor
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import QMimeData, Qt
+from PySide6.QtCore import QMimeData, Qt, QSize
 
 
 
@@ -43,7 +43,17 @@ class WorkspaceCanvas(QWidget):
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
-        self.setStyleSheet("background-color: white;")
+        self.setFocusPolicy(Qt.StrongFocus)
+        self._zoom_factor = 1.0
+        self._zoom_step = 1.15
+        self._min_zoom = 0.4
+        self._max_zoom = 3.0
+        self._is_panning = False
+        self._pan_last_pos = None
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(QPalette.Window, QColor("#ffffff"))
+        self.setPalette(palette)
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasText() and event.mimeData().text() == "circle":
@@ -56,13 +66,119 @@ class WorkspaceCanvas(QWidget):
             event.ignore()
             return
 
+        self.setFocus()
         drop_pos = event.position().toPoint()
-        circle = MovableCircle("○", self)
-        circle.setStyleSheet("font-size: 48px; color: #111827;")
-        circle.adjustSize()
-        circle.move(drop_pos.x() - circle.width() // 2, drop_pos.y() - circle.height() // 2)
+        circle = MovableCircle("", self)
+        circle._icon_path = "icons/circlev2.png"
+        circle_size = max(8, int(round(48 * self._zoom_factor)))
+        circle.setPixmap(QIcon(circle._icon_path).pixmap(circle_size, circle_size))
+        circle.setFixedSize(circle_size, circle_size)
+        circle.setStyleSheet("background-color: #ffffff; border: none;")
+        target_x = drop_pos.x() - circle.width() // 2
+        target_y = drop_pos.y() - circle.height() // 2
+        bounded_x, bounded_y = self._bounded_position(target_x, target_y, circle.width(), circle.height())
+        circle.move(bounded_x, bounded_y)
         circle.show()
         event.acceptProposedAction()
+
+    def mousePressEvent(self, event) -> None:
+        self.setFocus()
+        if event.button() == Qt.LeftButton and self.childAt(event.position().toPoint()) is None:
+            self._is_panning = True
+            self._pan_last_pos = event.position().toPoint()
+            self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._is_panning and (event.buttons() & Qt.LeftButton) and self._pan_last_pos is not None:
+            current_pos = event.position().toPoint()
+            delta = current_pos - self._pan_last_pos
+            self._pan_last_pos = current_pos
+            self._pan_all_circles(delta.x(), delta.y())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton and self._is_panning:
+            self._is_panning = False
+            self._pan_last_pos = None
+            self.unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def wheelEvent(self, event) -> None:
+        if event.modifiers() & Qt.ControlModifier:
+            if event.angleDelta().y() > 0:
+                self._apply_zoom(self._zoom_factor * self._zoom_step)
+            elif event.angleDelta().y() < 0:
+                self._apply_zoom(self._zoom_factor / self._zoom_step)
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+    def keyPressEvent(self, event) -> None:
+        if event.modifiers() & Qt.ControlModifier:
+            key_text = event.text()
+            if key_text == "+" or event.key() in (Qt.Key_Plus, Qt.Key_Equal):
+                self._apply_zoom(self._zoom_factor * self._zoom_step)
+                event.accept()
+                return
+            if key_text == "-" or event.key() in (Qt.Key_Minus, Qt.Key_Underscore):
+                self._apply_zoom(self._zoom_factor / self._zoom_step)
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
+    def _apply_zoom(self, new_zoom: float) -> None:
+        clamped_zoom = max(self._min_zoom, min(new_zoom, self._max_zoom))
+        if abs(clamped_zoom - self._zoom_factor) < 1e-9:
+            return
+
+        ratio = clamped_zoom / self._zoom_factor
+        self._zoom_factor = clamped_zoom
+
+        for circle in self.findChildren(MovableCircle):
+            new_x = int(round(circle.x() * ratio))
+            new_y = int(round(circle.y() * ratio))
+            new_w = max(8, int(round(circle.width() * ratio)))
+            new_h = max(8, int(round(circle.height() * ratio)))
+
+            circle.setFixedSize(new_w, new_h)
+            icon_path = getattr(circle, "_icon_path", "")
+            if icon_path:
+                circle.setPixmap(QIcon(icon_path).pixmap(new_w, new_h))
+
+            bounded_x, bounded_y = self._bounded_position(new_x, new_y, new_w, new_h)
+            circle.move(bounded_x, bounded_y)
+
+    def _pan_all_circles(self, dx: int, dy: int) -> None:
+        if dx == 0 and dy == 0:
+            return
+
+        for circle in self.findChildren(MovableCircle):
+            new_x = circle.x() + dx
+            new_y = circle.y() + dy
+            bounded_x, bounded_y = self._bounded_position(new_x, new_y, circle.width(), circle.height())
+            circle.move(bounded_x, bounded_y)
+
+    def _bounded_position(self, x: int, y: int, w: int, h: int) -> tuple[int, int]:
+        # Mantener siempre los límites equivalentes al zoom mínimo,
+        # independientemente del zoom actual.
+        extra_x = int(round((self.width() * (1.0 - self._min_zoom)) / 2.0))
+        extra_y = int(round((self.height() * (1.0 - self._min_zoom)) / 2.0))
+
+        min_x = -extra_x
+        min_y = -extra_y
+        max_x = self.width() + extra_x - w
+        max_y = self.height() + extra_y - h
+
+        bounded_x = max(min_x, min(x, max_x))
+        bounded_y = max(min_y, min(y, max_y))
+        return bounded_x, bounded_y
 
 #Aquí se define que el círculo que se ha creado en el espacio de trabajo se pueda mover arrastrándolo con el mouse, pero sin salir de los límites del espacio de trabajo.
 class MovableCircle(QLabel):
@@ -81,14 +197,15 @@ class MovableCircle(QLabel):
         if self._drag_offset is None:
             return
 
-        parent = self.parentWidget()
         target_pos = self.mapToParent(event.position().toPoint() - self._drag_offset)
-
-        max_x = max(0, parent.width() - self.width())
-        max_y = max(0, parent.height() - self.height())
-        bounded_x = max(0, min(target_pos.x(), max_x))
-        bounded_y = max(0, min(target_pos.y(), max_y))
-        self.move(bounded_x, bounded_y)
+        parent = self.parentWidget()
+        if hasattr(parent, "_bounded_position"):
+            bounded_x, bounded_y = parent._bounded_position(
+                target_pos.x(), target_pos.y(), self.width(), self.height()
+            )
+            self.move(bounded_x, bounded_y)
+        else:
+            self.move(target_pos.x(), target_pos.y())
 
     def mouseReleaseEvent(self, event) -> None:
         self._drag_offset = None
@@ -96,6 +213,19 @@ class MovableCircle(QLabel):
 
 #Aquí definimos la página de la aplicación.
 class MainWindow(QMainWindow):
+
+    _tool_button_style = (
+        "font-size: 24px;"
+        "background-color: white;"
+        "border: 1px solid #d1d5db;"
+        "border-radius: 10px;"
+    )
+    _active_tool_button_style = (
+        "font-size: 24px;"
+        "background-color: #e5e7eb;"
+        "border: 1px solid #9ca3af;"
+        "border-radius: 10px;"
+    )
 
     def __init__(self):
         super().__init__()
@@ -170,20 +300,30 @@ class MainWindow(QMainWindow):
         tool_layout.setContentsMargins(12, 12, 12, 12)
         tool_layout.setSpacing(12)
 
-        mouse_button = QPushButton("🖱")
-        circle_button = DraggableToolButton("○", "circle")
-        arrow_button = QPushButton("➜")
+        mouse_button = QPushButton()
+        mouse_button.setIcon(QIcon("icons/hand.png"))
+        mouse_button.setIconSize(QSize(32, 32))
+        circle_button = DraggableToolButton("", "circle")
+        circle_button.setIcon(QIcon("icons/circlev2.png"))
+        circle_button.setIconSize(QSize(32, 32))
+        arrow_button = QPushButton()
+        arrow_button.setIcon(QIcon("icons/curved-arrow.png"))
+        arrow_button.setIconSize(QSize(32, 32))
         back_button = QPushButton("Back")
+
+        mouse_button.clicked.connect(
+            lambda: self._set_active_tool_button(mouse_button, arrow_button)
+        )
+        arrow_button.clicked.connect(
+            lambda: self._set_active_tool_button(arrow_button, mouse_button)
+        )
 
         for tool_button in (mouse_button, circle_button, arrow_button):
             tool_button.setMinimumHeight(56)
-            tool_button.setStyleSheet(
-                "font-size: 24px;"
-                "background-color: white;"
-                "border: 1px solid #d1d5db;"
-                "border-radius: 10px;"
-            )
+            tool_button.setStyleSheet(self._tool_button_style)
             tool_layout.addWidget(tool_button)
+
+        self._set_active_tool_button(mouse_button, arrow_button)
 
         tool_layout.addStretch(1)
 
@@ -204,6 +344,10 @@ class MainWindow(QMainWindow):
         page_layout.addWidget(workspace, 1)
 
         return page
+
+    def _set_active_tool_button(self, active_button: QPushButton, inactive_button: QPushButton) -> None:
+        active_button.setStyleSheet(self._active_tool_button_style)
+        inactive_button.setStyleSheet(self._tool_button_style)
 
 
 app = QApplication()
