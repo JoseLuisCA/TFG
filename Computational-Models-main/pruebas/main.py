@@ -1,4 +1,6 @@
-from PySide6.QtGui import QDrag, QFont, QIcon, QPalette, QColor
+import math
+
+from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QPainter, QPalette, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -10,7 +12,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import QMimeData, Qt, QSize
+from PySide6.QtCore import QMimeData, QPointF, QSize, Qt
 
 
 
@@ -44,6 +46,9 @@ class WorkspaceCanvas(QWidget):
         super().__init__()
         self.setAcceptDrops(True)
         self.setFocusPolicy(Qt.StrongFocus)
+        self._active_tool = "hand"
+        self._pending_connection_start = None
+        self._connections = []
         self._zoom_factor = 1.0
         self._zoom_step = 1.15
         self._min_zoom = 0.4
@@ -54,6 +59,12 @@ class WorkspaceCanvas(QWidget):
         palette = self.palette()
         palette.setColor(QPalette.Window, QColor("#ffffff"))
         self.setPalette(palette)
+
+    def set_active_tool(self, tool_name: str) -> None:
+        self._active_tool = tool_name
+        if tool_name != "arrow":
+            self._pending_connection_start = None
+        self.update()
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasText() and event.mimeData().text() == "circle":
@@ -79,10 +90,14 @@ class WorkspaceCanvas(QWidget):
         bounded_x, bounded_y = self._bounded_position(target_x, target_y, circle.width(), circle.height())
         circle.move(bounded_x, bounded_y)
         circle.show()
+        self.update()
         event.acceptProposedAction()
 
     def mousePressEvent(self, event) -> None:
         self.setFocus()
+        if self._active_tool == "arrow":
+            self._pending_connection_start = None
+            self.update()
         if event.button() == Qt.LeftButton and self.childAt(event.position().toPoint()) is None:
             self._is_panning = True
             self._pan_last_pos = event.position().toPoint()
@@ -155,6 +170,8 @@ class WorkspaceCanvas(QWidget):
             bounded_x, bounded_y = self._bounded_position(new_x, new_y, new_w, new_h)
             circle.move(bounded_x, bounded_y)
 
+        self.update()
+
     def _pan_all_circles(self, dx: int, dy: int) -> None:
         if dx == 0 and dy == 0:
             return
@@ -164,6 +181,8 @@ class WorkspaceCanvas(QWidget):
             new_y = circle.y() + dy
             bounded_x, bounded_y = self._bounded_position(new_x, new_y, circle.width(), circle.height())
             circle.move(bounded_x, bounded_y)
+
+        self.update()
 
     def _bounded_position(self, x: int, y: int, w: int, h: int) -> tuple[int, int]:
         # Mantener siempre los límites equivalentes al zoom mínimo,
@@ -180,6 +199,89 @@ class WorkspaceCanvas(QWidget):
         bounded_y = max(min_y, min(y, max_y))
         return bounded_x, bounded_y
 
+    def handle_circle_click(self, circle: "MovableCircle") -> None:
+        if self._active_tool != "arrow":
+            return
+
+        if self._pending_connection_start is None:
+            self._pending_connection_start = circle
+            self.update()
+            return
+
+        if self._pending_connection_start is circle:
+            self._pending_connection_start = None
+            self.update()
+            return
+
+        self._connections.append((self._pending_connection_start, circle))
+        self._pending_connection_start = None
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(QColor("#1f2937"), 2)
+        painter.setPen(pen)
+        painter.setBrush(QColor("#1f2937"))
+
+        for start_circle, end_circle in self._connections:
+            self._draw_arrow(painter, start_circle, end_circle)
+
+        if self._active_tool == "arrow" and self._pending_connection_start is not None:
+            highlight_pen = QPen(QColor("#2563eb"), 2)
+            painter.setPen(highlight_pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(self._circle_rect(self._pending_connection_start))
+
+    def _draw_arrow(self, painter: QPainter, start_circle: "MovableCircle", end_circle: "MovableCircle") -> None:
+        start_center = self._circle_center(start_circle)
+        end_center = self._circle_center(end_circle)
+
+        dx = end_center.x() - start_center.x()
+        dy = end_center.y() - start_center.y()
+        distance = math.hypot(dx, dy)
+        if distance == 0:
+            return
+
+        start_radius = min(start_circle.width(), start_circle.height()) / 2.0
+        end_radius = min(end_circle.width(), end_circle.height()) / 2.0
+
+        unit_x = dx / distance
+        unit_y = dy / distance
+
+        line_start = QPointF(
+            start_center.x() + unit_x * start_radius,
+            start_center.y() + unit_y * start_radius,
+        )
+        line_end = QPointF(
+            end_center.x() - unit_x * end_radius,
+            end_center.y() - unit_y * end_radius,
+        )
+
+        painter.setPen(QPen(QColor("#1f2937"), 2))
+        painter.setBrush(QColor("#1f2937"))
+        painter.drawLine(line_start, line_end)
+
+        arrow_size = 10.0
+        angle = math.atan2(line_end.y() - line_start.y(), line_end.x() - line_start.x())
+        arrow_p1 = QPointF(
+            line_end.x() - arrow_size * math.cos(angle - math.pi / 6.0),
+            line_end.y() - arrow_size * math.sin(angle - math.pi / 6.0),
+        )
+        arrow_p2 = QPointF(
+            line_end.x() - arrow_size * math.cos(angle + math.pi / 6.0),
+            line_end.y() - arrow_size * math.sin(angle + math.pi / 6.0),
+        )
+        painter.drawPolygon(QPolygonF([line_end, arrow_p1, arrow_p2]))
+
+    def _circle_center(self, circle: "MovableCircle") -> QPointF:
+        return QPointF(circle.x() + circle.width() / 2.0, circle.y() + circle.height() / 2.0)
+
+    def _circle_rect(self, circle: "MovableCircle"):
+        return circle.geometry()
+
 #Aquí se define que el círculo que se ha creado en el espacio de trabajo se pueda mover arrastrándolo con el mouse, pero sin salir de los límites del espacio de trabajo.
 class MovableCircle(QLabel):
     def __init__(self, text: str, parent: QWidget):
@@ -187,23 +289,31 @@ class MovableCircle(QLabel):
         self._drag_offset = None
 
     def mousePressEvent(self, event) -> None:
+        parent = self.parentWidget()
+        if event.button() == Qt.LeftButton and hasattr(parent, "_active_tool") and parent._active_tool == "arrow":
+            parent.handle_circle_click(self)
+            event.accept()
+            return
         if event.button() == Qt.LeftButton:
             self._drag_offset = event.position().toPoint()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
+        parent = self.parentWidget()
+        if hasattr(parent, "_active_tool") and parent._active_tool == "arrow":
+            return
         if not (event.buttons() & Qt.LeftButton):
             return
         if self._drag_offset is None:
             return
 
         target_pos = self.mapToParent(event.position().toPoint() - self._drag_offset)
-        parent = self.parentWidget()
         if hasattr(parent, "_bounded_position"):
             bounded_x, bounded_y = parent._bounded_position(
                 target_pos.x(), target_pos.y(), self.width(), self.height()
             )
             self.move(bounded_x, bounded_y)
+            parent.update()
         else:
             self.move(target_pos.x(), target_pos.y())
 
@@ -339,6 +449,8 @@ class MainWindow(QMainWindow):
         tool_layout.addWidget(back_button)
 
         workspace = WorkspaceCanvas()
+        mouse_button.clicked.connect(lambda: workspace.set_active_tool("hand"))
+        arrow_button.clicked.connect(lambda: workspace.set_active_tool("arrow"))
 
         page_layout.addWidget(tool_menu)
         page_layout.addWidget(workspace, 1)
