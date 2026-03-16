@@ -1,6 +1,16 @@
 import math
 
-from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QPainter, QPalette, QPen, QPolygonF
+from PySide6.QtGui import (
+    QColor,
+    QDrag,
+    QFont,
+    QIcon,
+    QPainter,
+    QPainterPath,
+    QPalette,
+    QPen,
+    QPolygonF,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -49,6 +59,7 @@ class WorkspaceCanvas(QWidget):
         self._active_tool = "hand"
         self._pending_connection_start = None
         self._connections = []
+        self._next_state_index = 0
         self._zoom_factor = 1.0
         self._zoom_step = 1.15
         self._min_zoom = 0.4
@@ -81,6 +92,8 @@ class WorkspaceCanvas(QWidget):
         drop_pos = event.position().toPoint()
         circle = MovableCircle("", self)
         circle._icon_path = "icons/circlev2.png"
+        circle.set_state_name(f"q{self._next_state_index}")
+        self._next_state_index += 1
         circle_size = max(8, int(round(48 * self._zoom_factor)))
         circle.setPixmap(QIcon(circle._icon_path).pixmap(circle_size, circle_size))
         circle.setFixedSize(circle_size, circle_size)
@@ -213,7 +226,8 @@ class WorkspaceCanvas(QWidget):
             self.update()
             return
 
-        self._connections.append((self._pending_connection_start, circle))
+        if not self._has_connection(self._pending_connection_start, circle):
+            self._connections.append((self._pending_connection_start, circle))
         self._pending_connection_start = None
         self.update()
 
@@ -227,7 +241,9 @@ class WorkspaceCanvas(QWidget):
         painter.setBrush(QColor("#1f2937"))
 
         for start_circle, end_circle in self._connections:
-            self._draw_arrow(painter, start_circle, end_circle)
+            has_reverse = self._has_connection(end_circle, start_circle)
+            curve_sign = 1.0 if has_reverse else 0.0
+            self._draw_arrow(painter, start_circle, end_circle, curve_sign)
 
         if self._active_tool == "arrow" and self._pending_connection_start is not None:
             highlight_pen = QPen(QColor("#2563eb"), 2)
@@ -235,7 +251,13 @@ class WorkspaceCanvas(QWidget):
             painter.setBrush(Qt.NoBrush)
             painter.drawEllipse(self._circle_rect(self._pending_connection_start))
 
-    def _draw_arrow(self, painter: QPainter, start_circle: "MovableCircle", end_circle: "MovableCircle") -> None:
+    def _draw_arrow(
+        self,
+        painter: QPainter,
+        start_circle: "MovableCircle",
+        end_circle: "MovableCircle",
+        curve_sign: float,
+    ) -> None:
         start_center = self._circle_center(start_circle)
         end_center = self._circle_center(end_circle)
 
@@ -260,12 +282,47 @@ class WorkspaceCanvas(QWidget):
             end_center.y() - unit_y * end_radius,
         )
 
+        perpendicular_x = -unit_y
+        perpendicular_y = unit_x
+
+        if curve_sign != 0.0:
+            # Separa carriles de ida/vuelta para que no se superpongan.
+            lane_offset = 8.0
+            line_start = QPointF(
+                line_start.x() + perpendicular_x * lane_offset * curve_sign,
+                line_start.y() + perpendicular_y * lane_offset * curve_sign,
+            )
+            line_end = QPointF(
+                line_end.x() + perpendicular_x * lane_offset * curve_sign,
+                line_end.y() + perpendicular_y * lane_offset * curve_sign,
+            )
+
         painter.setPen(QPen(QColor("#1f2937"), 2))
-        painter.setBrush(QColor("#1f2937"))
-        painter.drawLine(line_start, line_end)
+
+        control_point = QPointF(
+            (line_start.x() + line_end.x()) / 2.0,
+            (line_start.y() + line_end.y()) / 2.0,
+        )
+
+        painter.setBrush(Qt.NoBrush)
+        if curve_sign != 0.0:
+            curve_offset = min(48.0, max(22.0, distance * 0.18))
+            control_point = QPointF(
+                control_point.x() + perpendicular_x * curve_offset * curve_sign,
+                control_point.y() + perpendicular_y * curve_offset * curve_sign,
+            )
+            path = QPainterPath(line_start)
+            path.quadTo(control_point, line_end)
+            painter.drawPath(path)
+            arrow_dx = line_end.x() - control_point.x()
+            arrow_dy = line_end.y() - control_point.y()
+        else:
+            painter.drawLine(line_start, line_end)
+            arrow_dx = line_end.x() - line_start.x()
+            arrow_dy = line_end.y() - line_start.y()
 
         arrow_size = 10.0
-        angle = math.atan2(line_end.y() - line_start.y(), line_end.x() - line_start.x())
+        angle = math.atan2(arrow_dy, arrow_dx)
         arrow_p1 = QPointF(
             line_end.x() - arrow_size * math.cos(angle - math.pi / 6.0),
             line_end.y() - arrow_size * math.sin(angle - math.pi / 6.0),
@@ -274,6 +331,7 @@ class WorkspaceCanvas(QWidget):
             line_end.x() - arrow_size * math.cos(angle + math.pi / 6.0),
             line_end.y() - arrow_size * math.sin(angle + math.pi / 6.0),
         )
+        painter.setBrush(QColor("#1f2937"))
         painter.drawPolygon(QPolygonF([line_end, arrow_p1, arrow_p2]))
 
     def _circle_center(self, circle: "MovableCircle") -> QPointF:
@@ -282,11 +340,22 @@ class WorkspaceCanvas(QWidget):
     def _circle_rect(self, circle: "MovableCircle"):
         return circle.geometry()
 
+    def _has_connection(self, start_circle: "MovableCircle", end_circle: "MovableCircle") -> bool:
+        for existing_start, existing_end in self._connections:
+            if existing_start is start_circle and existing_end is end_circle:
+                return True
+        return False
+
 #Aquí se define que el círculo que se ha creado en el espacio de trabajo se pueda mover arrastrándolo con el mouse, pero sin salir de los límites del espacio de trabajo.
 class MovableCircle(QLabel):
     def __init__(self, text: str, parent: QWidget):
         super().__init__(text, parent)
         self._drag_offset = None
+        self._state_name = ""
+
+    def set_state_name(self, state_name: str) -> None:
+        self._state_name = state_name
+        self.update()
 
     def mousePressEvent(self, event) -> None:
         parent = self.parentWidget()
@@ -320,6 +389,22 @@ class MovableCircle(QLabel):
     def mouseReleaseEvent(self, event) -> None:
         self._drag_offset = None
         super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        pixmap = self.pixmap()
+        if pixmap is not None and not pixmap.isNull():
+            painter.drawPixmap(self.rect(), pixmap)
+
+        if self._state_name:
+            font = self.font()
+            font.setBold(True)
+            font.setPointSize(max(8, int(self.height() * 0.22)))
+            painter.setFont(font)
+            painter.setPen(QColor("#111827"))
+            painter.drawText(self.rect(), Qt.AlignCenter, self._state_name)
 
 #Aquí definimos la página de la aplicación.
 class MainWindow(QMainWindow):
