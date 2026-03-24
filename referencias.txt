@@ -1,0 +1,6 @@
+Referencias:
+
+flecha:<a href="https://www.flaticon.com/free-icons/curved-arrow" title="curved arrow icons">Curved arrow icons created by Creartive - Flaticon</a>
+circulo:<a href="https://www.flaticon.com/free-icons/circle" title="circle icons">Circle icons created by DinosoftLabs - Flaticon</a>
+mano:<a href="https://www.flaticon.com/free-icons/cursor" title="cursor icons">Cursor icons created by Freepik - Flaticon</a>
+circulo2:<a href="https://www.flaticon.com/free-icons/circle" title="circle icons">Circle icons created by Freepik - Flaticon</a>
