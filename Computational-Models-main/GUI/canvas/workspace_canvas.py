@@ -60,7 +60,7 @@ class WorkspaceCanvas(QWidget):
         self.setFocus()
         drop_pos = event.position().toPoint()
         circle = MovableCircle("", self)
-        circle._icon_path = str(ICONS_DIR / "circlev2.png")
+        circle._icon_path = str(ICONS_DIR / "state.png")
         circle.set_state_name(f"q{self._next_state_index}")
         self._next_state_index += 1
         circle_size = max(8, int(round(48 * self._zoom_factor)))

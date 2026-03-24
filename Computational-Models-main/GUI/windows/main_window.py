@@ -109,7 +109,7 @@ class MainWindow(QMainWindow):
         mouse_button.setIcon(QIcon(str(ICONS_DIR / "hand.png")))
         mouse_button.setIconSize(QSize(32, 32))
         circle_button = DraggableToolButton("", "circle")
-        circle_button.setIcon(QIcon(str(ICONS_DIR / "circlev2.png")))
+        circle_button.setIcon(QIcon(str(ICONS_DIR / "state.png")))
         circle_button.setIconSize(QSize(32, 32))
         arrow_button = QPushButton()
         arrow_button.setIcon(QIcon(str(ICONS_DIR / "curved-arrow.png")))
