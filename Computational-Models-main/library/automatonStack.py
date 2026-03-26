@@ -80,6 +80,39 @@ class AutomatonStack:
     
     def setFinalStates(self, final_states):
         self.__final_states = final_states 
+    
+    """ Methods to modify states and transitions dynamically """
+    
+    def add_state(self, state_name):
+        """Adds a new state to the automaton"""
+        if state_name not in self.__states_set:
+            self.__states_set = self.__states_set.union({state_name})
+    
+    def add_transition(self, from_state, input_symbol, stack_symbol_pop, stack_symbols_push):
+        """Adds a new transition to the automaton with stack operations"""
+        if input_symbol not in self.__alphabet_symbols:
+            self.__alphabet_symbols = self.__alphabet_symbols.union({input_symbol})
+        
+        if isinstance(stack_symbols_push, str):
+            stack_symbols_push = [stack_symbols_push]
+        
+        new_transition = TransitionAutomatonStack(from_state, input_symbol, stack_symbol_pop, stack_symbols_push)
+        self.__transition_function = self.__transition_function.union({new_transition})
+    
+    def set_state_as_initial(self, state):
+        """Sets a state as the initial state of the automaton"""
+        if state in self.__states_set:
+            self.__initial_state = state
+    
+    def set_state_as_final(self, state):
+        """Adds a state to the set of final states"""
+        if state in self.__states_set and state not in self.__final_states:
+            self.__final_states = self.__final_states.union({state})
+    
+    def set_state_as_regular(self, state):
+        """Removes a state from the set of final states (makes it regular)"""
+        if state in self.__final_states:
+            self.__final_states = self.__final_states.difference({state})
        
     """ Static method that creates an automaton with stack
     from a list of strings. """    

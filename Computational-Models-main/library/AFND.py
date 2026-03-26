@@ -64,6 +64,49 @@ class FiniteAutomaton:
     def setFinalStates(self, final_states):
         self.__final_states = final_states
                 
+    
+    """ Methods to modify states and transitions dynamically """
+    
+    def add_state(self, state_name):
+        """Adds a new state to the automaton"""
+        if state_name not in self.__states_set:
+            self.__states_set = self.__states_set.union({state_name})
+    
+    def add_transition(self, from_state, symbol, to_state):
+        """Adds a new transition to the automaton"""
+        if symbol not in self.__alphabet_symbols:
+            self.__alphabet_symbols = self.__alphabet_symbols.union({symbol})
+        
+        # Check if transition already exists
+        transition_exists = False
+        for transition in self.__transition_function:
+            if (transition.getInitialState() == from_state and 
+                transition.getInputSymbol() == symbol):
+                # Add to existing transition's final states
+                if to_state not in transition.getFinalStates():
+                    transition.getFinalStates().append(to_state)
+                transition_exists = True
+                break
+        
+        if not transition_exists:
+            # Create new transition
+            new_transition = Transition(from_state, symbol, [to_state])
+            self.__transition_function = self.__transition_function.union({new_transition})
+    
+    def set_state_as_initial(self, state):
+        """Sets a state as the initial state of the automaton"""
+        if state in self.__states_set:
+            self.__initial_state = state
+    
+    def set_state_as_final(self, state):
+        """Adds a state to the set of final states"""
+        if state in self.__states_set and state not in self.__final_states:
+            self.__final_states = self.__final_states.union({state})
+    
+    def set_state_as_regular(self, state):
+        """Removes a state from the set of final states (makes it regular)"""
+        if state in self.__final_states:
+            self.__final_states = self.__final_states.difference({state})
         
     """It validates the transition function by checking that all transitions are right.
     A transition is correct if, and only if, the initial and final states belong to 
