@@ -83,7 +83,14 @@ class MovableCircle(QLabel):
 
         pixmap = self.pixmap()
         if pixmap is not None and not pixmap.isNull():
-            painter.drawPixmap(self.rect(), pixmap)
+            scale_factor = 1.0 if self._state_type == "initial" else 0.76
+            target_size = self.size() * scale_factor
+            scaled_pixmap = pixmap.scaled(
+                target_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            x = (self.width() - scaled_pixmap.width()) // 2
+            y = (self.height() - scaled_pixmap.height()) // 2
+            painter.drawPixmap(x, y, scaled_pixmap)
 
         if self._state_name:
             font = self.font()
@@ -91,4 +98,7 @@ class MovableCircle(QLabel):
             font.setPointSize(max(8, int(self.height() * 0.22)))
             painter.setFont(font)
             painter.setPen(QColor("#111827"))
-            painter.drawText(self.rect(), Qt.AlignCenter, self._state_name)
+            text_rect = self.rect()
+            if self._state_type == "initial":
+                text_rect = text_rect.translated(12, 0)
+            painter.drawText(text_rect, Qt.AlignCenter, self._state_name)

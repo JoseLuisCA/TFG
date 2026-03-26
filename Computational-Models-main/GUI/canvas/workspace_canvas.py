@@ -69,7 +69,7 @@ class WorkspaceCanvas(QWidget):
         circle.set_state_type("normal")
         circle.set_state_name(f"q{self._next_state_index}")
         self._next_state_index += 1
-        circle_size = max(8, int(round(48 * self._zoom_factor)))
+        circle_size = max(8, int(round(90 * self._zoom_factor)))
         circle.setPixmap(QIcon(circle._icon_path).pixmap(circle_size, circle_size))
         circle.setFixedSize(circle_size, circle_size)
         circle.setStyleSheet("background-color: #ffffff; border: none;")
