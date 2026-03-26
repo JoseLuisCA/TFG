@@ -4,3 +4,6 @@ flecha:<a href="https://www.flaticon.com/free-icons/curved-arrow" title="curved 
 circulo:<a href="https://www.flaticon.com/free-icons/circle" title="circle icons">Circle icons created by DinosoftLabs - Flaticon</a>
 mano:<a href="https://www.flaticon.com/free-icons/cursor" title="cursor icons">Cursor icons created by Freepik - Flaticon</a>
 circulo2:<a href="https://www.flaticon.com/free-icons/circle" title="circle icons">Circle icons created by Freepik - Flaticon</a>
+
+
+Computación:https://www.uhu.es/francisco.moreno/gii_mac/docs/Tema_1.pdf

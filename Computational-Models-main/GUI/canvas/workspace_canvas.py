@@ -12,7 +12,7 @@ from PySide6.QtGui import (
     QPen,
     QPolygonF,
 )
-from PySide6.QtWidgets import QInputDialog, QWidget
+from PySide6.QtWidgets import QInputDialog, QMenu, QWidget
 
 from widgets.movable_circle import MovableCircle
 
@@ -29,6 +29,11 @@ class WorkspaceCanvas(QWidget):
         self._pending_connection_start = None
         self._connections = []
         self._next_state_index = 0
+        self._state_icon_paths = {
+            "normal": str(ICONS_DIR / "state.png"),
+            "initial": str(ICONS_DIR / "initial_state.png"),
+            "final": str(ICONS_DIR / "final_state.png"),
+        }
         self._zoom_factor = 1.0
         self._zoom_step = 1.15
         self._min_zoom = 0.4
@@ -60,7 +65,8 @@ class WorkspaceCanvas(QWidget):
         self.setFocus()
         drop_pos = event.position().toPoint()
         circle = MovableCircle("", self)
-        circle._icon_path = str(ICONS_DIR / "state.png")
+        circle._icon_path = self._state_icon_paths["normal"]
+        circle.set_state_type("normal")
         circle.set_state_name(f"q{self._next_state_index}")
         self._next_state_index += 1
         circle_size = max(8, int(round(48 * self._zoom_factor)))
@@ -110,6 +116,29 @@ class WorkspaceCanvas(QWidget):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event) -> None:
+        connection_index = self._find_connection_index_at(event.pos())
+        if connection_index is None:
+            super().contextMenuEvent(event)
+            return
+
+        menu = QMenu(self)
+        edit_action = menu.addAction("Modificar simbolos de transicion")
+        selected_action = menu.exec(event.globalPos())
+        if selected_action is not edit_action:
+            return
+
+        current_symbols = self._connections[connection_index].get("symbols", "")
+        symbols, ok = QInputDialog.getText(
+            self,
+            "Modificar transicion",
+            "Introduce los simbolos de la transicion separados por una coma. (a,b,c,d)",
+            text=current_symbols,
+        )
+        if ok:
+            self._connections[connection_index]["symbols"] = self._normalize_symbols(symbols)
+            self.update()
 
     def wheelEvent(self, event) -> None:
         if event.modifiers() & Qt.ControlModifier:
@@ -418,6 +447,15 @@ class WorkspaceCanvas(QWidget):
         self.update()
 
     def _delete_connection_at(self, point) -> bool:
+        index = self._find_connection_index_at(point)
+        if index is not None:
+            self._connections.pop(index)
+            self.update()
+            return True
+
+        return False
+
+    def _find_connection_index_at(self, point):
         point_f = QPointF(point)
         for index in range(len(self._connections) - 1, -1, -1):
             connection = self._connections[index]
@@ -429,11 +467,9 @@ class WorkspaceCanvas(QWidget):
             stroker.setWidth(14.0)
             hit_path = stroker.createStroke(path)
             if hit_path.contains(point_f):
-                self._connections.pop(index)
-                self.update()
-                return True
+                return index
 
-        return False
+        return None
 
     def _connection_path(self, connection):
         start_circle = connection["start"]
@@ -524,3 +560,14 @@ class WorkspaceCanvas(QWidget):
     def _normalize_symbols(self, symbols: str) -> str:
         items = [item.strip() for item in symbols.split(",") if item.strip()]
         return ",".join(items)
+
+    def apply_circle_state_type(self, circle: "MovableCircle", state_type: str) -> None:
+        icon_path = self._state_icon_paths.get(state_type)
+        if not icon_path:
+            return
+
+        circle._icon_path = icon_path
+        circle.set_state_type(state_type)
+        circle.setPixmap(QIcon(icon_path).pixmap(circle.width(), circle.height()))
+        circle.update()
+        self.update()

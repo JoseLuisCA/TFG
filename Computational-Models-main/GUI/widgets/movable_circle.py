@@ -1,6 +1,6 @@
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtWidgets import QLabel, QMenu, QWidget
 
 
 class MovableCircle(QLabel):
@@ -8,10 +8,14 @@ class MovableCircle(QLabel):
         super().__init__(text, parent)
         self._drag_offset = None
         self._state_name = ""
+        self._state_type = "normal"
 
     def set_state_name(self, state_name: str) -> None:
         self._state_name = state_name
         self.update()
+
+    def set_state_type(self, state_type: str) -> None:
+        self._state_type = state_type
 
     def mousePressEvent(self, event) -> None:
         parent = self.parentWidget()
@@ -49,6 +53,29 @@ class MovableCircle(QLabel):
     def mouseReleaseEvent(self, event) -> None:
         self._drag_offset = None
         super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event) -> None:
+        parent = self.parentWidget()
+        if not hasattr(parent, "apply_circle_state_type"):
+            return
+
+        options_by_type = {
+            "normal": [("Hacer inicial", "initial"), ("Hacer final", "final")],
+            "initial": [("Hacer final", "final"), ("Hacer normal", "normal")],
+            "final": [("Hacer inicial", "initial"), ("Hacer normal", "normal")],
+        }
+
+        options = options_by_type.get(self._state_type, options_by_type["normal"])
+        menu = QMenu(self)
+        action_map = {}
+        for label, target_type in options:
+            action = menu.addAction(label)
+            action_map[action] = target_type
+
+        selected_action = menu.exec(event.globalPos())
+        if selected_action in action_map:
+            parent.apply_circle_state_type(self, action_map[selected_action])
+            event.accept()
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)

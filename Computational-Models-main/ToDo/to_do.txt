@@ -1,0 +1,9 @@
+Lista de cosas que hacer:
+
+
+
+Meter los nuevos iconos
+
+Meter que con click secundario puedas cambiar estados a finales o iniciales, y viceversa
+
+Con click secundario editar transiciones
