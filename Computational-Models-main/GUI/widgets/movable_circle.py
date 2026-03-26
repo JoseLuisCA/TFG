@@ -46,7 +46,10 @@ class MovableCircle(QLabel):
                 target_pos.x(), target_pos.y(), self.width(), self.height()
             )
             self.move(bounded_x, bounded_y)
-            parent.update()
+            if hasattr(parent, "refresh_view"):
+                parent.refresh_view()
+            else:
+                parent.update()
         else:
             self.move(target_pos.x(), target_pos.y())
 

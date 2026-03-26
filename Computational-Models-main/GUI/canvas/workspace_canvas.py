@@ -45,11 +45,27 @@ class WorkspaceCanvas(QWidget):
         palette.setColor(QPalette.Window, QColor("#ffffff"))
         self.setPalette(palette)
 
+        self._overlay = _ConnectionsOverlay(self)
+        self._overlay.setGeometry(self.rect())
+        self._overlay.raise_()
+
+    def refresh_view(self) -> None:
+        self.update()
+        if hasattr(self, "_overlay"):
+            self._overlay.raise_()
+            self._overlay.update()
+
     def set_active_tool(self, tool_name: str) -> None:
         self._active_tool = tool_name
         if tool_name != "arrow":
             self._pending_connection_start = None
-        self.update()
+        self.refresh_view()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "_overlay"):
+            self._overlay.setGeometry(self.rect())
+            self._overlay.raise_()
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasText() and event.mimeData().text() == "circle":
@@ -78,14 +94,14 @@ class WorkspaceCanvas(QWidget):
         bounded_x, bounded_y = self._bounded_position(target_x, target_y, circle.width(), circle.height())
         circle.move(bounded_x, bounded_y)
         circle.show()
-        self.update()
+        self.refresh_view()
         event.acceptProposedAction()
 
     def mousePressEvent(self, event) -> None:
         self.setFocus()
         if self._active_tool == "arrow":
             self._pending_connection_start = None
-            self.update()
+            self.refresh_view()
         if self._active_tool == "delete" and event.button() == Qt.LeftButton:
             if self._delete_connection_at(event.position().toPoint()):
                 event.accept()
@@ -138,7 +154,7 @@ class WorkspaceCanvas(QWidget):
         )
         if ok:
             self._connections[connection_index]["symbols"] = self._normalize_symbols(symbols)
-            self.update()
+            self.refresh_view()
 
     def wheelEvent(self, event) -> None:
         if event.modifiers() & Qt.ControlModifier:
@@ -185,7 +201,7 @@ class WorkspaceCanvas(QWidget):
             bounded_x, bounded_y = self._bounded_position(new_x, new_y, new_w, new_h)
             circle.move(bounded_x, bounded_y)
 
-        self.update()
+        self.refresh_view()
 
     def _pan_all_circles(self, dx: int, dy: int) -> None:
         if dx == 0 and dy == 0:
@@ -197,7 +213,7 @@ class WorkspaceCanvas(QWidget):
             bounded_x, bounded_y = self._bounded_position(new_x, new_y, circle.width(), circle.height())
             circle.move(bounded_x, bounded_y)
 
-        self.update()
+        self.refresh_view()
 
     def _bounded_position(self, x: int, y: int, w: int, h: int) -> tuple[int, int]:
         extra_x = int(round((self.width() * (1.0 - self._min_zoom)) / 2.0))
@@ -218,7 +234,7 @@ class WorkspaceCanvas(QWidget):
 
         if self._pending_connection_start is None:
             self._pending_connection_start = circle
-            self.update()
+            self.refresh_view()
             return
 
         if not self._has_connection(self._pending_connection_start, circle):
@@ -237,12 +253,9 @@ class WorkspaceCanvas(QWidget):
                     }
                 )
         self._pending_connection_start = None
-        self.update()
+        self.refresh_view()
 
-    def paintEvent(self, event) -> None:
-        super().paintEvent(event)
-
-        painter = QPainter(self)
+    def _paint_connections(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.Antialiasing)
         pen = QPen(QColor("#1f2937"), 2)
         painter.setPen(pen)
@@ -444,13 +457,13 @@ class WorkspaceCanvas(QWidget):
             if connection["start"] is not circle and connection["end"] is not circle
         ]
         circle.deleteLater()
-        self.update()
+        self.refresh_view()
 
     def _delete_connection_at(self, point) -> bool:
         index = self._find_connection_index_at(point)
         if index is not None:
             self._connections.pop(index)
-            self.update()
+            self.refresh_view()
             return True
 
         return False
@@ -570,4 +583,18 @@ class WorkspaceCanvas(QWidget):
         circle.set_state_type(state_type)
         circle.setPixmap(QIcon(icon_path).pixmap(circle.width(), circle.height()))
         circle.update()
-        self.update()
+        self.refresh_view()
+
+
+class _ConnectionsOverlay(QWidget):
+    def __init__(self, parent: WorkspaceCanvas):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+    def paintEvent(self, event) -> None:
+        parent = self.parentWidget()
+        if isinstance(parent, WorkspaceCanvas):
+            painter = QPainter(self)
+            parent._paint_connections(painter)
