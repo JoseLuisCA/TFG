@@ -6,4 +6,34 @@ IMPLEMENTACION
 PLANIFICACION
 RESULTADOS
 
-seramoral@decsai.ugr.es
+
+
+
+Cabecera y homomorfismo en operaciones de lenguajes?
+
+Entiendo que deberia entrar en detalle en cuanto a como construir los grafos a partir de concatenacion, union, calusura,
+tambien el tema de tenemos dos automatas, uno que acepta 0 pares y uno que unos no multiplo de 3 y juntarlos
+
+Explicar todo lo de eliminar estados, construir expresiones regulares,...
+
+Explicar todo el paso de expresiones regulares a automatas y viceversa, al igual que afnd a afd
+
+Meter ejemplos de automatas con sus diagramas para explicar todo lo anterior además de ejemplos generales para que se vea que forma tienen
+
+Arreglar los indices
+
+realmente tengo explicar cosas como el proceso de eliminar estados inaccesibles? proceso algo largo de explicar y es siquiera relevante para mi tfg?
+O mejor simplemente explico lo que son pero no entro en detalle de como hacer las operaciones.
+
+Me gustaría que vieramos un poco las transparencias por encimas y veamos que meter y que no
+
+Tener claro si mi tfg tiene un objetivo didactico o asumo que el usuario ya sabe de modelos de computación(o algunas bases) es decir, mi aplicacion va a 
+tener un diseño enfocado a explicar cosas y luego poder recrearlas y jugar con ellas o simplemente es 
+una herramienta para que alguien que ya sabe pueda probar cosas y corregir ejercicios,...
+
+
+Gramaticas independientes de contexto: construccion de los arboles?¿
+
+
+
+

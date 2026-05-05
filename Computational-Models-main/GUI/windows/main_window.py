@@ -3,8 +3,10 @@ from pathlib import Path
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QMainWindow,
     QPushButton,
     QSizePolicy,
@@ -115,6 +117,8 @@ class MainWindow(QMainWindow):
         arrow_button.setIcon(QIcon(str(ICONS_DIR / "curved-arrow.png")))
         arrow_button.setIconSize(QSize(32, 32))
         delete_button = QPushButton("X")
+        open_button = QPushButton("Open")
+        save_button = QPushButton("Save")
         back_button = QPushButton("Back")
 
         mouse_button.clicked.connect(
@@ -136,6 +140,26 @@ class MainWindow(QMainWindow):
 
         tool_layout.addStretch(1)
 
+        open_button.setMinimumHeight(44)
+        open_button.setStyleSheet(
+            "font-size: 16px;"
+            "font-weight: 600;"
+            "background-color: white;"
+            "border: 1px solid #d1d5db;"
+            "border-radius: 10px;"
+        )
+        tool_layout.addWidget(open_button)
+
+        save_button.setMinimumHeight(44)
+        save_button.setStyleSheet(
+            "font-size: 16px;"
+            "font-weight: 600;"
+            "background-color: white;"
+            "border: 1px solid #d1d5db;"
+            "border-radius: 10px;"
+        )
+        tool_layout.addWidget(save_button)
+
         back_button.setMinimumHeight(44)
         back_button.setStyleSheet(
             "font-size: 16px;"
@@ -151,6 +175,8 @@ class MainWindow(QMainWindow):
         mouse_button.clicked.connect(lambda: workspace.set_active_tool("hand"))
         arrow_button.clicked.connect(lambda: workspace.set_active_tool("arrow"))
         delete_button.clicked.connect(lambda: workspace.set_active_tool("delete"))
+        open_button.clicked.connect(lambda: self._open_finite_automaton(workspace))
+        save_button.clicked.connect(lambda: self._save_finite_automaton(workspace))
 
         page_layout.addWidget(tool_menu)
         page_layout.addWidget(workspace, 1)
@@ -161,3 +187,54 @@ class MainWindow(QMainWindow):
         active_button.setStyleSheet(self._active_tool_button_style)
         for button in inactive_buttons:
             button.setStyleSheet(self._tool_button_style)
+
+    def _save_finite_automaton(self, workspace: WorkspaceCanvas) -> None:
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Guardar automata",
+            "automaton.txt",
+            "Text files (*.txt);;All files (*)",
+        )
+        if not file_path:
+            return
+
+        saved = workspace.save_automaton_to_file(file_path)
+        if not saved:
+            QMessageBox.warning(
+                self,
+                "Guardar automata",
+                "No hay estados para guardar. Crea al menos un estado antes de guardar.",
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            "Guardar automata",
+            "Automata guardado correctamente.",
+        )
+
+    def _open_finite_automaton(self, workspace: WorkspaceCanvas) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Abrir automata",
+            "",
+            "Text files (*.txt);;All files (*)",
+        )
+        if not file_path:
+            return
+
+        try:
+            workspace.load_automaton_from_file(file_path)
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                "Abrir automata",
+                f"No se pudo abrir el automata.\n\nDetalle: {error}",
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            "Abrir automata",
+            "Automata cargado correctamente.",
+        )

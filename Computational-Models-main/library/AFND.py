@@ -63,6 +63,53 @@ class FiniteAutomaton:
     
     def setFinalStates(self, final_states):
         self.__final_states = final_states
+
+    def _normalize_symbols(self, symbols):
+        if isinstance(symbols, str):
+            return [item.strip() for item in symbols.split(",") if item.strip()]
+        return [item for item in symbols if item]
+
+    def _as_unique_list(self, values):
+        result = []
+        for value in values:
+            if value not in result:
+                result.append(value)
+        return result
+
+    def _set_states(self, states):
+        unique_states = self._as_unique_list(states)
+        if isinstance(self.__states_set, set):
+            self.__states_set = set(unique_states)
+        else:
+            self.__states_set = unique_states
+
+    def _set_alphabet(self, alphabet):
+        unique_alphabet = self._as_unique_list(alphabet)
+        if isinstance(self.__alphabet_symbols, set):
+            self.__alphabet_symbols = set(unique_alphabet)
+        else:
+            self.__alphabet_symbols = unique_alphabet
+
+    def _set_final_states(self, final_states):
+        unique_finals = self._as_unique_list(final_states)
+        if isinstance(self.__final_states, set):
+            self.__final_states = set(unique_finals)
+        else:
+            self.__final_states = unique_finals
+
+    def _get_transition_list(self):
+        if isinstance(self.__transition_function, list):
+            return self.__transition_function
+        if isinstance(self.__transition_function, set):
+            return list(self.__transition_function)
+        return list(self.__transition_function)
+
+    def _set_transition_list(self, transitions):
+        cleaned = self._as_unique_list(transitions)
+        if isinstance(self.__transition_function, set):
+            self.__transition_function = set(cleaned)
+        else:
+            self.__transition_function = cleaned
                 
     
     """ Methods to modify states and transitions dynamically """
@@ -70,16 +117,22 @@ class FiniteAutomaton:
     def add_state(self, state_name):
         """Adds a new state to the automaton"""
         if state_name not in self.__states_set:
-            self.__states_set = self.__states_set.union({state_name})
+            states = self._as_unique_list(list(self.__states_set) + [state_name])
+            self._set_states(states)
     
     def add_transition(self, from_state, symbol, to_state):
         """Adds a new transition to the automaton"""
+        self.add_state(from_state)
+        self.add_state(to_state)
+
         if symbol not in self.__alphabet_symbols:
-            self.__alphabet_symbols = self.__alphabet_symbols.union({symbol})
+            alphabet = self._as_unique_list(list(self.__alphabet_symbols) + [symbol])
+            self._set_alphabet(alphabet)
         
         # Check if transition already exists
+        transitions = self._get_transition_list()
         transition_exists = False
-        for transition in self.__transition_function:
+        for transition in transitions:
             if (transition.getInitialState() == from_state and 
                 transition.getInputSymbol() == symbol):
                 # Add to existing transition's final states
@@ -91,22 +144,137 @@ class FiniteAutomaton:
         if not transition_exists:
             # Create new transition
             new_transition = Transition(from_state, symbol, [to_state])
-            self.__transition_function = self.__transition_function.union({new_transition})
+            transitions.append(new_transition)
+
+        self._set_transition_list(transitions)
     
     def set_state_as_initial(self, state):
         """Sets a state as the initial state of the automaton"""
-        if state in self.__states_set:
-            self.__initial_state = state
+        if state not in self.__states_set:
+            self.add_state(state)
+        self.__initial_state = state
     
     def set_state_as_final(self, state):
         """Adds a state to the set of final states"""
-        if state in self.__states_set and state not in self.__final_states:
-            self.__final_states = self.__final_states.union({state})
+        if state not in self.__states_set:
+            self.add_state(state)
+        if state not in self.__final_states:
+            final_states = self._as_unique_list(list(self.__final_states) + [state])
+            self._set_final_states(final_states)
     
     def set_state_as_regular(self, state):
-        """Removes a state from the set of final states (makes it regular)"""
+        """Removes initial/final properties from a state (makes it regular)"""
         if state in self.__final_states:
-            self.__final_states = self.__final_states.difference({state})
+            new_finals = [final_state for final_state in self.__final_states if final_state != state]
+            self._set_final_states(new_finals)
+        if self.__initial_state == state:
+            self.__initial_state = None
+
+    def remove_state(self, state):
+        """Removes a state and its related transitions"""
+        if state not in self.__states_set:
+            return
+
+        self._set_states([s for s in self.__states_set if s != state])
+        self._set_final_states([s for s in self.__final_states if s != state])
+
+        if self.__initial_state == state:
+            self.__initial_state = None
+
+        transitions = []
+        for transition in self._get_transition_list():
+            if transition.getInitialState() == state:
+                continue
+
+            remaining_targets = [target for target in transition.getFinalStates() if target != state]
+            if remaining_targets:
+                transition.setFinalStates(remaining_targets)
+                transitions.append(transition)
+
+        self._set_transition_list(transitions)
+
+    def remove_transition(self, from_state, symbol, to_state=None):
+        """Removes a transition or one specific destination"""
+        transitions = []
+        for transition in self._get_transition_list():
+            is_same_transition = (
+                transition.getInitialState() == from_state
+                and transition.getInputSymbol() == symbol
+            )
+
+            if not is_same_transition:
+                transitions.append(transition)
+                continue
+
+            if to_state is None:
+                continue
+
+            remaining_targets = [target for target in transition.getFinalStates() if target != to_state]
+            if remaining_targets:
+                transition.setFinalStates(remaining_targets)
+                transitions.append(transition)
+
+        self._set_transition_list(transitions)
+
+    def update_transition_symbols(self, from_state, to_state, symbols):
+        """Replaces all symbols used from one state to another"""
+        symbol_list = self._normalize_symbols(symbols)
+
+        transitions = []
+        for transition in self._get_transition_list():
+            if transition.getInitialState() != from_state:
+                transitions.append(transition)
+                continue
+
+            remaining_targets = [target for target in transition.getFinalStates() if target != to_state]
+            if remaining_targets:
+                transition.setFinalStates(remaining_targets)
+                transitions.append(transition)
+
+        self._set_transition_list(transitions)
+
+        for symbol in symbol_list:
+            self.add_transition(from_state, symbol, to_state)
+
+    def to_dict(self):
+        """Exports the automaton model as a serializable dictionary"""
+        transitions = []
+        for transition in self._get_transition_list():
+            transitions.append(
+                {
+                    "from": transition.getInitialState(),
+                    "symbol": transition.getInputSymbol(),
+                    "to": list(transition.getFinalStates()),
+                }
+            )
+
+        return {
+            "states": list(self.__states_set),
+            "alphabet": list(self.__alphabet_symbols),
+            "initial": self.__initial_state,
+            "final": list(self.__final_states),
+            "transitions": transitions,
+        }
+
+    def from_dict(self, model):
+        """Loads the automaton model from a dictionary"""
+        states = model.get("states", [])
+        alphabet = model.get("alphabet", [])
+        initial = model.get("initial")
+        final_states = model.get("final", [])
+
+        transitions = []
+        for transition_data in model.get("transitions", []):
+            start_state = transition_data.get("from")
+            input_symbol = transition_data.get("symbol")
+            final_targets = transition_data.get("to", [])
+            transitions.append(Transition(start_state, input_symbol, list(final_targets)))
+
+        self._set_states(states)
+        self._set_alphabet(alphabet)
+        self._set_final_states(final_states)
+        self.__initial_state = initial
+        self._set_transition_list(transitions)
         
     """It validates the transition function by checking that all transitions are right.
     A transition is correct if, and only if, the initial and final states belong to 

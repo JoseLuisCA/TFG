@@ -80,39 +80,221 @@ class AutomatonStack:
     
     def setFinalStates(self, final_states):
         self.__final_states = final_states 
+
+    def _as_unique_list(self, values):
+        result = []
+        for value in values:
+            if value not in result:
+                result.append(value)
+        return result
+
+    def _set_states(self, states):
+        unique_states = self._as_unique_list(states)
+        if isinstance(self.__states_set, set):
+            self.__states_set = set(unique_states)
+        else:
+            self.__states_set = unique_states
+
+    def _set_input_alphabet(self, symbols):
+        unique_symbols = self._as_unique_list(symbols)
+        if isinstance(self.__alphabet_symbols, set):
+            self.__alphabet_symbols = set(unique_symbols)
+        else:
+            self.__alphabet_symbols = unique_symbols
+
+    def _set_stack_alphabet(self, symbols):
+        unique_symbols = self._as_unique_list(symbols)
+        if isinstance(self.__stack_symbols, set):
+            self.__stack_symbols = set(unique_symbols)
+        else:
+            self.__stack_symbols = unique_symbols
+
+    def _set_final_states(self, final_states):
+        unique_finals = self._as_unique_list(final_states)
+        if isinstance(self.__final_states, set):
+            self.__final_states = set(unique_finals)
+        else:
+            self.__final_states = unique_finals
+
+    def _get_transition_list(self):
+        if isinstance(self.__transition_function, list):
+            return self.__transition_function
+        if isinstance(self.__transition_function, set):
+            return list(self.__transition_function)
+        return list(self.__transition_function)
+
+    def _set_transition_list(self, transitions):
+        cleaned = self._as_unique_list(transitions)
+        if isinstance(self.__transition_function, set):
+            self.__transition_function = set(cleaned)
+        else:
+            self.__transition_function = cleaned
     
     """ Methods to modify states and transitions dynamically """
     
     def add_state(self, state_name):
         """Adds a new state to the automaton"""
         if state_name not in self.__states_set:
-            self.__states_set = self.__states_set.union({state_name})
+            states = self._as_unique_list(list(self.__states_set) + [state_name])
+            self._set_states(states)
     
     def add_transition(self, from_state, input_symbol, stack_symbol_pop, stack_symbols_push):
         """Adds a new transition to the automaton with stack operations"""
+        self.add_state(from_state)
+
         if input_symbol not in self.__alphabet_symbols:
-            self.__alphabet_symbols = self.__alphabet_symbols.union({input_symbol})
+            alphabet = self._as_unique_list(list(self.__alphabet_symbols) + [input_symbol])
+            self._set_input_alphabet(alphabet)
+
+        if stack_symbol_pop not in self.__stack_symbols:
+            stack_symbols = self._as_unique_list(list(self.__stack_symbols) + [stack_symbol_pop])
+            self._set_stack_alphabet(stack_symbols)
         
         if isinstance(stack_symbols_push, str):
             stack_symbols_push = [stack_symbols_push]
+
+        for symbol in stack_symbols_push:
+            if symbol and symbol not in self.__stack_symbols:
+                stack_symbols = self._as_unique_list(list(self.__stack_symbols) + [symbol])
+                self._set_stack_alphabet(stack_symbols)
         
         new_transition = TransitionAutomatonStack(from_state, input_symbol, stack_symbol_pop, stack_symbols_push)
-        self.__transition_function = self.__transition_function.union({new_transition})
+        transitions = self._get_transition_list()
+        transitions.append(new_transition)
+        self._set_transition_list(transitions)
     
     def set_state_as_initial(self, state):
         """Sets a state as the initial state of the automaton"""
-        if state in self.__states_set:
-            self.__initial_state = state
+        if state not in self.__states_set:
+            self.add_state(state)
+        self.__initial_state = state
     
     def set_state_as_final(self, state):
         """Adds a state to the set of final states"""
-        if state in self.__states_set and state not in self.__final_states:
-            self.__final_states = self.__final_states.union({state})
+        if state not in self.__states_set:
+            self.add_state(state)
+        if state not in self.__final_states:
+            final_states = self._as_unique_list(list(self.__final_states) + [state])
+            self._set_final_states(final_states)
     
     def set_state_as_regular(self, state):
-        """Removes a state from the set of final states (makes it regular)"""
+        """Removes initial/final properties from a state (makes it regular)"""
         if state in self.__final_states:
-            self.__final_states = self.__final_states.difference({state})
+            new_finals = [final_state for final_state in self.__final_states if final_state != state]
+            self._set_final_states(new_finals)
+        if self.__initial_state == state:
+            self.__initial_state = None
+
+    def remove_state(self, state):
+        """Removes a state and all transitions related to it"""
+        if state not in self.__states_set:
+            return
+
+        self._set_states([s for s in self.__states_set if s != state])
+        self._set_final_states([s for s in self.__final_states if s != state])
+
+        if self.__initial_state == state:
+            self.__initial_state = None
+
+        filtered_transitions = []
+        for transition in self._get_transition_list():
+            if transition.getInitialState() == state:
+                continue
+
+            transition_tuples = [
+                transition_tuple
+                for transition_tuple in transition.getTransitionTuples()
+                if transition_tuple[0] != state
+            ]
+            if transition_tuples:
+                transition.setTransitionTuples(transition_tuples)
+                filtered_transitions.append(transition)
+
+        self._set_transition_list(filtered_transitions)
+
+    def remove_transition(self, from_state, input_symbol, stack_symbol_pop=None, to_state=None):
+        """Removes a full stack transition or one target tuple"""
+        filtered_transitions = []
+        for transition in self._get_transition_list():
+            is_same = (
+                transition.getInitialState() == from_state
+                and transition.getInputSymbol() == input_symbol
+                and (stack_symbol_pop is None or transition.getInitialTop() == stack_symbol_pop)
+            )
+
+            if not is_same:
+                filtered_transitions.append(transition)
+                continue
+
+            if to_state is None:
+                continue
+
+            transition_tuples = [
+                transition_tuple
+                for transition_tuple in transition.getTransitionTuples()
+                if transition_tuple[0] != to_state
+            ]
+            if transition_tuples:
+                transition.setTransitionTuples(transition_tuples)
+                filtered_transitions.append(transition)
+
+        self._set_transition_list(filtered_transitions)
+
+    def update_transition_tuples(self, from_state, input_symbol, stack_symbol_pop, transition_tuples):
+        """Replaces target tuples of a stack transition"""
+        self.remove_transition(from_state, input_symbol, stack_symbol_pop)
+        self.add_transition(from_state, input_symbol, stack_symbol_pop, transition_tuples)
+
+    def to_dict(self):
+        """Exports the automaton model as a serializable dictionary"""
+        transitions = []
+        for transition in self._get_transition_list():
+            transitions.append(
+                {
+                    "from": transition.getInitialState(),
+                    "input": transition.getInputSymbol(),
+                    "stack_pop": transition.getInitialTop(),
+                    "targets": list(transition.getTransitionTuples()),
+                }
+            )
+
+        return {
+            "states": list(self.__states_set),
+            "alphabet": list(self.__alphabet_symbols),
+            "stack_symbols": list(self.__stack_symbols),
+            "initial": self.__initial_state,
+            "final": list(self.__final_states),
+            "initial_stack_symbol": self.__initial_symbol_stack,
+            "transitions": transitions,
+        }
+
+    def from_dict(self, model):
+        """Loads the automaton model from a dictionary"""
+        states = model.get("states", [])
+        alphabet = model.get("alphabet", [])
+        stack_symbols = model.get("stack_symbols", [])
+        initial = model.get("initial")
+        final_states = model.get("final", [])
+        initial_stack_symbol = model.get("initial_stack_symbol")
+
+        transitions = []
+        for transition_data in model.get("transitions", []):
+            transitions.append(
+                TransitionAutomatonStack(
+                    transition_data.get("from"),
+                    transition_data.get("input"),
+                    transition_data.get("stack_pop"),
+                    list(transition_data.get("targets", [])),
+                )
+            )
+
+        self._set_states(states)
+        self._set_input_alphabet(alphabet)
+        self._set_stack_alphabet(stack_symbols)
+        self._set_final_states(final_states)
+        self.__initial_state = initial
+        self.__initial_symbol_stack = initial_stack_symbol
+        self._set_transition_list(transitions)
        
     """ Static method that creates an automaton with stack
     from a list of strings. """    

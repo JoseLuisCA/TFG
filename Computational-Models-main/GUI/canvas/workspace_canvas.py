@@ -1,4 +1,5 @@
 import math
+import re
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, Qt
@@ -33,6 +34,7 @@ class WorkspaceCanvas(QWidget):
             "normal": str(ICONS_DIR / "state.png"),
             "initial": str(ICONS_DIR / "initial_state.png"),
             "final": str(ICONS_DIR / "final_state.png"),
+            "initial_final": str(ICONS_DIR / "initial_final_state.png"),
         }
         self._zoom_factor = 1.0
         self._zoom_step = 1.15
@@ -584,6 +586,235 @@ class WorkspaceCanvas(QWidget):
         circle.setPixmap(QIcon(icon_path).pixmap(circle.width(), circle.height()))
         circle.update()
         self.refresh_view()
+
+    def _ordered_state_names_for_export(self) -> list[str]:
+        circles = [circle for circle in self.findChildren(MovableCircle) if getattr(circle, "_state_name", "")]
+        circles.sort(key=lambda circle: circle._state_name)
+
+        initial_circles = [circle for circle in circles if getattr(circle, "_state_type", "normal") in ("initial", "initial_final")]
+        if not initial_circles:
+            return [circle._state_name for circle in circles]
+
+        initial_circles.sort(key=lambda circle: circle._state_name)
+        chosen_initial = initial_circles[0]
+
+        ordered = [chosen_initial._state_name]
+        ordered.extend(circle._state_name for circle in circles if circle is not chosen_initial)
+        return ordered
+
+    def build_automaton_text(self) -> str:
+        state_names = self._ordered_state_names_for_export()
+        if not state_names:
+            return ""
+
+        finals = []
+        for circle in self.findChildren(MovableCircle):
+            if getattr(circle, "_state_name", "") and getattr(circle, "_state_type", "normal") in ("final", "initial_final"):
+                if circle._state_name not in finals:
+                    finals.append(circle._state_name)
+        finals.sort()
+
+        transition_map = {}
+        alphabet = []
+        for connection in self._connections:
+            start_name = getattr(connection["start"], "_state_name", "")
+            end_name = getattr(connection["end"], "_state_name", "")
+            if not start_name or not end_name:
+                continue
+
+            symbols = self._normalize_symbols(connection.get("symbols", ""))
+            if not symbols:
+                continue
+
+            for symbol in [item.strip() for item in symbols.split(",") if item.strip()]:
+                if symbol not in alphabet:
+                    alphabet.append(symbol)
+                key = (start_name, symbol)
+                if key not in transition_map:
+                    transition_map[key] = []
+                if end_name not in transition_map[key]:
+                    transition_map[key].append(end_name)
+
+        alphabet.sort()
+
+        lines = [
+            "Q = {" + ",".join(state_names) + "}",
+            "A = {" + ",".join(alphabet) + "}",
+            "F = {" + ",".join(finals) + "}",
+            "",
+        ]
+
+        ordered_transitions = sorted(transition_map.items(), key=lambda item: (item[0][0], item[0][1]))
+        for (start_state, symbol), targets in ordered_transitions:
+            target_text = ",".join(sorted(targets))
+            lines.append(f"({start_state},{symbol}) -> {{{target_text}}}")
+
+        return "\n".join(lines)
+
+    def save_automaton_to_file(self, file_path: str) -> bool:
+        automaton_text = self.build_automaton_text()
+        if not automaton_text:
+            return False
+
+        with open(file_path, "w", encoding="utf-8") as output_file:
+            output_file.write(automaton_text)
+
+        return True
+
+    def clear_canvas(self) -> None:
+        self._pending_connection_start = None
+        self._connections = []
+        for circle in self.findChildren(MovableCircle):
+            circle.deleteLater()
+        self.refresh_view()
+
+    def load_automaton_from_file(self, file_path: str) -> None:
+        with open(file_path, "r", encoding="utf-8") as input_file:
+            text = input_file.read()
+        self.load_automaton_text(text)
+
+    def load_automaton_text(self, text: str) -> None:
+        model = self._parse_automaton_text(text)
+
+        states = model["states"]
+        finals = set(model["finals"])
+        initial_state = states[0]
+
+        self.clear_canvas()
+
+        circles_by_name = {}
+        canvas_width = max(self.width(), 700)
+        canvas_height = max(self.height(), 500)
+        circle_size = max(8, int(round(90 * self._zoom_factor)))
+
+        if len(states) == 1:
+            positions = [(canvas_width // 2 - circle_size // 2, canvas_height // 2 - circle_size // 2)]
+        else:
+            radius = max(140.0, min(canvas_width, canvas_height) * 0.33)
+            center_x = canvas_width / 2.0
+            center_y = canvas_height / 2.0
+            positions = []
+            for index in range(len(states)):
+                angle = -math.pi / 2.0 + (2.0 * math.pi * index / len(states))
+                x = int(round(center_x + radius * math.cos(angle) - circle_size / 2.0))
+                y = int(round(center_y + radius * math.sin(angle) - circle_size / 2.0))
+                positions.append((x, y))
+
+        for index, state_name in enumerate(states):
+            if state_name == initial_state and state_name in finals:
+                state_type = "initial_final"
+            elif state_name == initial_state:
+                state_type = "initial"
+            elif state_name in finals:
+                state_type = "final"
+            else:
+                state_type = "normal"
+
+            circle = MovableCircle("", self)
+            circle._icon_path = self._state_icon_paths[state_type]
+            circle.set_state_type(state_type)
+            circle.set_state_name(state_name)
+            circle.setPixmap(QIcon(circle._icon_path).pixmap(circle_size, circle_size))
+            circle.setFixedSize(circle_size, circle_size)
+            circle.setStyleSheet("background-color: #ffffff; border: none;")
+
+            pos_x, pos_y = positions[index]
+            bounded_x, bounded_y = self._bounded_position(pos_x, pos_y, circle.width(), circle.height())
+            circle.move(bounded_x, bounded_y)
+            circle.show()
+            circles_by_name[state_name] = circle
+
+        for transition in model["transitions"]:
+            start_circle = circles_by_name.get(transition["from"])
+            end_circle = circles_by_name.get(transition["to"])
+            if start_circle is None or end_circle is None:
+                continue
+            self._connections.append(
+                {
+                    "start": start_circle,
+                    "end": end_circle,
+                    "symbols": self._normalize_symbols(",".join(transition["symbols"])),
+                }
+            )
+
+        max_state_index = -1
+        for state_name in states:
+            match = re.fullmatch(r"q(\d+)", state_name)
+            if match is not None:
+                max_state_index = max(max_state_index, int(match.group(1)))
+        self._next_state_index = max_state_index + 1 if max_state_index >= 0 else len(states)
+
+        self.refresh_view()
+
+    def _parse_automaton_text(self, text: str) -> dict:
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+        q_line = next((line for line in lines if line.startswith("Q")), None)
+        f_line = next((line for line in lines if line.startswith("F")), None)
+        if q_line is None:
+            raise ValueError("No se encontro la linea de estados: Q = {...}")
+        if f_line is None:
+            raise ValueError("No se encontro la linea de finales: F = {...}")
+
+        states = self._parse_braced_values(q_line)
+        finals = self._parse_braced_values(f_line)
+        if not states:
+            raise ValueError("El automata no contiene estados en la linea Q")
+
+        transition_map = {}
+        transition_lines = [line for line in lines if line.startswith("(") and "->" in line]
+
+        for transition_line in transition_lines:
+            left_text, right_text = transition_line.split("->", 1)
+            left_text = left_text.strip()
+            right_text = right_text.strip()
+
+            if not (left_text.startswith("(") and left_text.endswith(")")):
+                raise ValueError(f"Transicion invalida: {transition_line}")
+
+            left_content = left_text[1:-1]
+            left_parts = [item.strip() for item in left_content.split(",")]
+            if len(left_parts) != 2:
+                raise ValueError(f"Transicion invalida: {transition_line}")
+
+            start_state, symbol = left_parts
+            target_states = self._parse_braced_values(right_text)
+
+            for end_state in target_states:
+                key = (start_state, end_state)
+                if key not in transition_map:
+                    transition_map[key] = []
+                if symbol not in transition_map[key]:
+                    transition_map[key].append(symbol)
+
+                if start_state not in states:
+                    states.append(start_state)
+                if end_state not in states:
+                    states.append(end_state)
+
+        transitions = []
+        for (start_state, end_state), symbols in sorted(transition_map.items(), key=lambda item: (item[0][0], item[0][1])):
+            transitions.append(
+                {
+                    "from": start_state,
+                    "to": end_state,
+                    "symbols": sorted(symbols),
+                }
+            )
+
+        return {"states": states, "finals": finals, "transitions": transitions}
+
+    def _parse_braced_values(self, text: str) -> list[str]:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end < start:
+            raise ValueError(f"Formato invalido en linea: {text}")
+
+        content = text[start + 1 : end].strip()
+        if not content:
+            return []
+
+        return [item.strip() for item in content.split(",") if item.strip()]
 
 
 class _ConnectionsOverlay(QWidget):

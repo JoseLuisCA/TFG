@@ -63,9 +63,26 @@ class MovableCircle(QLabel):
             return
 
         options_by_type = {
-            "normal": [("Hacer inicial", "initial"), ("Hacer final", "final")],
-            "initial": [("Hacer final", "final"), ("Hacer normal", "normal")],
-            "final": [("Hacer inicial", "initial"), ("Hacer normal", "normal")],
+            "normal": [
+                ("Hacer inicial", "initial"),
+                ("Hacer final", "final"),
+                ("Hacer inicial y final", "initial_final"),
+            ],
+            "initial": [
+                ("Hacer final", "final"),
+                ("Hacer inicial y final", "initial_final"),
+                ("Hacer normal", "normal"),
+            ],
+            "final": [
+                ("Hacer inicial", "initial"),
+                ("Hacer inicial y final", "initial_final"),
+                ("Hacer normal", "normal"),
+            ],
+            "initial_final": [
+                ("Hacer solo inicial", "initial"),
+                ("Hacer solo final", "final"),
+                ("Hacer normal", "normal"),
+            ],
         }
 
         options = options_by_type.get(self._state_type, options_by_type["normal"])
@@ -86,7 +103,7 @@ class MovableCircle(QLabel):
 
         pixmap = self.pixmap()
         if pixmap is not None and not pixmap.isNull():
-            scale_factor = 1.0 if self._state_type == "initial" else 0.76
+            scale_factor = 1.0 if self._state_type in ("initial", "initial_final") else 0.76
             target_size = self.size() * scale_factor
             scaled_pixmap = pixmap.scaled(
                 target_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
@@ -102,6 +119,6 @@ class MovableCircle(QLabel):
             painter.setFont(font)
             painter.setPen(QColor("#111827"))
             text_rect = self.rect()
-            if self._state_type == "initial":
+            if self._state_type in ("initial", "initial_final"):
                 text_rect = text_rect.translated(12, 0)
             painter.drawText(text_rect, Qt.AlignCenter, self._state_name)
