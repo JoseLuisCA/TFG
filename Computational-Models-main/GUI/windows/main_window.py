@@ -5,6 +5,10 @@ from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
+    QLineEdit,
+    QCheckBox,
+    QDialogButtonBox,
     QLabel,
     QMessageBox,
     QMainWindow,
@@ -22,6 +26,7 @@ import os
 
 from library.AFND import FiniteAutomaton
 from library.AFD_to_reg import dfaToRegex
+from library.reg_to_AFND import regexToAutomaton
 from PySide6.QtWidgets import QDialog, QGridLayout
 
 
@@ -127,9 +132,10 @@ class MainWindow(QMainWindow):
         clean_btn = QPushButton("Clean")
         minimize_btn = QPushButton("Minimize")
         regex_btn = QPushButton("Regular Expression")
+        regex_to_fda_btn = QPushButton("Regex to FDA")
         analyze_btn = QPushButton("Analyze")
 
-        for b in (clean_btn, minimize_btn, regex_btn, analyze_btn):
+        for b in (clean_btn, minimize_btn, regex_btn, regex_to_fda_btn, analyze_btn):
             b.setMinimumHeight(36)
             b.setStyleSheet(
                 "font-size:14px; font-weight:600; background-color:white; border:1px solid #d1d5db; border-radius:8px; padding:6px;"
@@ -138,6 +144,7 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(clean_btn)
         content_layout.addWidget(minimize_btn)
         content_layout.addWidget(regex_btn)
+        content_layout.addWidget(regex_to_fda_btn)
         content_layout.addWidget(analyze_btn)
 
         top_layout.addWidget(header_btn)
@@ -237,6 +244,7 @@ class MainWindow(QMainWindow):
         clean_btn.clicked.connect(lambda: self._clean_automaton(workspace))
         minimize_btn.clicked.connect(lambda: self._minimize_automaton(workspace))
         regex_btn.clicked.connect(lambda: self._regular_expression_automaton(workspace))
+        regex_to_fda_btn.clicked.connect(lambda: self._regex_to_fda_automaton(workspace))
         analyze_btn.clicked.connect(lambda: self._analyze_automaton(workspace))
 
         main_row = QWidget()
@@ -318,10 +326,35 @@ class MainWindow(QMainWindow):
         finals = model.get("final", [])
         transitions = model.get("transitions", [])
 
+        # Map original state names to compact sequential names q_0, q_1, ...
+        state_map = {}
+        for idx, s in enumerate(states):
+            new_name = f"q_{idx}"
+            # ensure uniqueness just in case
+            i = 1
+            candidate = new_name
+            while candidate in state_map.values():
+                candidate = f"{new_name}_{i}"
+                i += 1
+            state_map[s] = candidate
+
+        # Ensure the initial state is first (workspace expects first state as initial)
+        initial_state_orig = model.get("initial")
+        sanitized_states = []
+        if initial_state_orig in state_map:
+            sanitized_states.append(state_map[initial_state_orig])
+
+        for s in states:
+            if s == initial_state_orig:
+                continue
+            sanitized_states.append(state_map[s])
+
+        sanitized_finals = [state_map.get(f, f) for f in finals]
+
         lines = [
-            "Q = {" + ",".join(states) + "}",
+            "Q = {" + ",".join(sanitized_states) + "}",
             "A = {" + ",".join(alphabet) + "}",
-            "F = {" + ",".join(finals) + "}",
+            "F = {" + ",".join(sanitized_finals) + "}",
             "",
         ]
 
@@ -329,7 +362,11 @@ class MainWindow(QMainWindow):
             frm = t.get("from")
             sym = t.get("symbol")
             tos = t.get("to", [])
-            lines.append(f"({frm},{sym}) -> {{{','.join(tos)}}}")
+
+            frm_s = state_map.get(frm, frm)
+            tos_s = [state_map.get(to, to) for to in tos]
+
+            lines.append(f"({frm_s},{sym}) -> {{{','.join(tos_s)}}}")
 
         text = "\n".join(lines)
         # load into canvas
@@ -419,6 +456,49 @@ class MainWindow(QMainWindow):
                 os.remove(tmp_path)
             except Exception:
                 pass
+
+    def _regex_to_fda_automaton(self, workspace: WorkspaceCanvas) -> None:
+        # Ensure the canvas is cleared so the conversion is independent
+        workspace.clear_canvas()
+
+        # Custom dialog with checkbox to optionally determinize & minimize
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Regex to FDA")
+        vlayout = QVBoxLayout(dlg)
+        vlayout.setContentsMargins(12, 12, 12, 12)
+
+        label = QLabel("Enter a regular expression:")
+        edit = QLineEdit()
+        checkbox = QCheckBox("Determinize and minimize (may be slow for large regexes)")
+        checkbox.setChecked(False)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+
+        vlayout.addWidget(label)
+        vlayout.addWidget(edit)
+        vlayout.addWidget(checkbox)
+        vlayout.addWidget(buttons)
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        regex_input = edit.text().strip()
+        if not regex_input:
+            return
+
+        try:
+            fa = regexToAutomaton(regex_input)
+            if checkbox.isChecked():
+                # Determinize and minimize only if user asked for it
+                fa = fa.transformDeterministic()
+                fa = fa.minimalAutomaton()
+
+            self._write_tmp_and_load(workspace, fa)
+            QMessageBox.information(self, "Regex to FDA", "Automaton created from regex.")
+        except Exception as e:
+            QMessageBox.critical(self, "Regex to FDA", f"Operation failed: {e}")
 
     def _analyze_automaton(self, workspace: WorkspaceCanvas) -> None:
         text = workspace.build_automaton_text()
