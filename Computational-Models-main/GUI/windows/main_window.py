@@ -21,6 +21,7 @@ from tempfile import NamedTemporaryFile
 import os
 
 from library.AFND import FiniteAutomaton
+from library.AFD_to_reg import dfaToRegex
 from PySide6.QtWidgets import QDialog, QGridLayout
 
 
@@ -111,9 +112,9 @@ class MainWindow(QMainWindow):
         top_layout.setContentsMargins(12, 8, 12, 8)
         top_layout.setSpacing(8)
 
-        header_btn = QPushButton("Tools ▾")
+        header_btn = QPushButton("Tools ▸")
         header_btn.setCheckable(True)
-        header_btn.setChecked(True)
+        header_btn.setChecked(False)
         header_btn.setStyleSheet(
             "font-size:16px; font-weight:600; background-color:#f9fafb; border:1px solid #e5e7eb; padding:8px;"
         )
@@ -125,9 +126,10 @@ class MainWindow(QMainWindow):
 
         clean_btn = QPushButton("Clean")
         minimize_btn = QPushButton("Minimize")
+        regex_btn = QPushButton("Regular Expression")
         analyze_btn = QPushButton("Analyze")
 
-        for b in (clean_btn, minimize_btn, analyze_btn):
+        for b in (clean_btn, minimize_btn, regex_btn, analyze_btn):
             b.setMinimumHeight(36)
             b.setStyleSheet(
                 "font-size:14px; font-weight:600; background-color:white; border:1px solid #d1d5db; border-radius:8px; padding:6px;"
@@ -135,6 +137,7 @@ class MainWindow(QMainWindow):
 
         content_layout.addWidget(clean_btn)
         content_layout.addWidget(minimize_btn)
+        content_layout.addWidget(regex_btn)
         content_layout.addWidget(analyze_btn)
 
         top_layout.addWidget(header_btn)
@@ -149,6 +152,7 @@ class MainWindow(QMainWindow):
                 content_widget.hide()
 
         header_btn.clicked.connect(toggle_top_content)
+        content_widget.hide()
 
         # Left vertical tool menu
         tool_menu = QWidget()
@@ -232,6 +236,7 @@ class MainWindow(QMainWindow):
         # connect top actions to handlers
         clean_btn.clicked.connect(lambda: self._clean_automaton(workspace))
         minimize_btn.clicked.connect(lambda: self._minimize_automaton(workspace))
+        regex_btn.clicked.connect(lambda: self._regular_expression_automaton(workspace))
         analyze_btn.clicked.connect(lambda: self._analyze_automaton(workspace))
 
         main_row = QWidget()
@@ -380,6 +385,40 @@ class MainWindow(QMainWindow):
     def _determinize_automaton(self, workspace: WorkspaceCanvas) -> None:
         # determinize action removed from UI; keep method placeholder in case needed later
         QMessageBox.information(self, "Determinize", "This action has been removed from the UI.")
+
+    def _regular_expression_automaton(self, workspace: WorkspaceCanvas) -> None:
+        text = workspace.build_automaton_text()
+        if not text:
+            QMessageBox.warning(self, "Regular Expression", "No automaton to convert.")
+            return
+
+        with NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8") as tmp:
+            tmp.write(text)
+            tmp_path = tmp.name
+
+        try:
+            fa = FiniteAutomaton.readAutomaton(tmp_path)
+            regex_source = fa.transformDeterministic()
+            regular_expression = dfaToRegex(regex_source)
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Regular Expression")
+            layout = QVBoxLayout(dlg)
+            label = QLabel(regular_expression)
+            label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            label.setWordWrap(True)
+            layout.addWidget(label)
+            dlg.setLayout(layout)
+            dlg.setModal(False)
+            dlg.show()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Regular Expression", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
 
     def _analyze_automaton(self, workspace: WorkspaceCanvas) -> None:
         text = workspace.build_automaton_text()
