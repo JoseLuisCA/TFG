@@ -111,18 +111,11 @@ class MainWindow(QMainWindow):
         page_vlayout.setContentsMargins(0, 0, 0, 0)
         page_vlayout.setSpacing(0)
 
-        # Top collapsible tools menu (English)
+        # Top operations bar
         top_menu = QWidget()
         top_layout = QHBoxLayout(top_menu)
         top_layout.setContentsMargins(12, 8, 12, 8)
         top_layout.setSpacing(8)
-
-        header_btn = QPushButton("Tools ▸")
-        header_btn.setCheckable(True)
-        header_btn.setChecked(False)
-        header_btn.setStyleSheet(
-            "font-size:16px; font-weight:600; background-color:#f9fafb; border:1px solid #e5e7eb; padding:8px;"
-        )
 
         content_widget = QWidget()
         content_layout = QHBoxLayout(content_widget)
@@ -133,9 +126,10 @@ class MainWindow(QMainWindow):
         minimize_btn = QPushButton("Minimize")
         regex_btn = QPushButton("Regular Expression")
         regex_to_fda_btn = QPushButton("Regex to FDA")
+        check_word_btn = QPushButton("Check Word")
         analyze_btn = QPushButton("Analyze")
 
-        for b in (clean_btn, minimize_btn, regex_btn, regex_to_fda_btn, analyze_btn):
+        for b in (clean_btn, minimize_btn, regex_btn, regex_to_fda_btn, check_word_btn, analyze_btn):
             b.setMinimumHeight(36)
             b.setStyleSheet(
                 "font-size:14px; font-weight:600; background-color:white; border:1px solid #d1d5db; border-radius:8px; padding:6px;"
@@ -145,21 +139,10 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(minimize_btn)
         content_layout.addWidget(regex_btn)
         content_layout.addWidget(regex_to_fda_btn)
+        content_layout.addWidget(check_word_btn)
         content_layout.addWidget(analyze_btn)
 
-        top_layout.addWidget(header_btn)
         top_layout.addWidget(content_widget, 1)
-
-        def toggle_top_content():
-            if header_btn.isChecked():
-                header_btn.setText("Tools ▾")
-                content_widget.show()
-            else:
-                header_btn.setText("Tools ▸")
-                content_widget.hide()
-
-        header_btn.clicked.connect(toggle_top_content)
-        content_widget.hide()
 
         # Left vertical tool menu
         tool_menu = QWidget()
@@ -245,6 +228,7 @@ class MainWindow(QMainWindow):
         minimize_btn.clicked.connect(lambda: self._minimize_automaton(workspace))
         regex_btn.clicked.connect(lambda: self._regular_expression_automaton(workspace))
         regex_to_fda_btn.clicked.connect(lambda: self._regex_to_fda_automaton(workspace))
+        check_word_btn.clicked.connect(lambda: self._check_word_automaton(workspace))
         analyze_btn.clicked.connect(lambda: self._analyze_automaton(workspace))
 
         main_row = QWidget()
@@ -499,6 +483,38 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Regex to FDA", "Automaton created from regex.")
         except Exception as e:
             QMessageBox.critical(self, "Regex to FDA", f"Operation failed: {e}")
+
+    def _check_word_automaton(self, workspace: WorkspaceCanvas) -> None:
+        text = workspace.build_automaton_text()
+        if not text:
+            QMessageBox.warning(self, "Check Word", "No automaton to check.")
+            return
+
+        word, ok = QInputDialog.getText(
+            self,
+            "Check Word",
+            "Enter the string to test:",
+            text="",
+        )
+        if not ok:
+            return
+
+        with NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8") as tmp:
+            tmp.write(text)
+            tmp_path = tmp.name
+
+        try:
+            fa = FiniteAutomaton.readAutomaton(tmp_path)
+            accepted = fa.wordBelongs(word)
+            message = "The automaton accepts the string." if accepted else "The automaton rejects the string."
+            QMessageBox.information(self, "Check Word", message)
+        except Exception as e:
+            QMessageBox.critical(self, "Check Word", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
 
     def _analyze_automaton(self, workspace: WorkspaceCanvas) -> None:
         text = workspace.build_automaton_text()
