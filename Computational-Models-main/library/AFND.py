@@ -524,6 +524,12 @@ class FiniteAutomaton:
         alphabet_symbols = self.getAlphabetSymbols()
         transitions = self.getTransitionFunction()
         num_transitions = len(transitions)
+
+        # If there are epsilon (empty) transitions present, automaton is not deterministic
+        for tr in transitions:
+            inp = tr.getInputSymbol()
+            if inp is None or str(inp).strip() == "":
+                return False
      
         """For each state p and input symbol a, look for a transition with initial state p and symbol a"""
         for state in states_set:
@@ -764,39 +770,43 @@ class FiniteAutomaton:
     states  if it is final, and the state is finally removed from the list.  """
     
     def __delete_state(self, state):
-        i = 0
-        transitions = self.getTransitionFunction()
-        final_states = self.getFinalStates()
-        
-        while i < len(transitions):
-            initial_state_transition = transitions[i].getInitialState()
-            final_states_transition = transitions[i].getFinalStates()
-            
-            if initial_state_transition == state or state in final_states_transition:
-                self.__transition_function.remove(transitions[i])
-                
-            else:
-                i+=1
-                
-        "delete of the set of final states if the state is final"
-        if state in final_states:
-            self.__final_states.remove(state)
-                
-        "Finally, remove the state from the list of states"
-        self.__states_set.remove(state)
+        # Rebuild transitions excluding the deleted state as source
+        # and removing the deleted state from transitions' target lists.
+        new_transitions = []
+        # iterate over a snapshot of transition list to avoid mutation issues
+        for transition in list(self._get_transition_list()):
+            # drop transitions that originate at the deleted state
+            if transition.getInitialState() == state:
+                continue
+
+            # remove the deleted state from the transition target list
+            remaining_targets = [t for t in transition.getFinalStates() if t != state]
+            if remaining_targets:
+                transition.setFinalStates(remaining_targets)
+                new_transitions.append(transition)
+            # if no remaining targets, drop the transition entirely
+
+        self._set_transition_list(new_transitions)
+
+        # remove state from final states if present
+        if state in (self.getFinalStates() or []):
+            remaining_finals = [s for s in self.getFinalStates() if s != state]
+            self._set_final_states(remaining_finals)
+
+        # finally, remove the state from the set of states
+        states_list = list(self.getStatesSet()) if isinstance(self.getStatesSet(), (list, tuple)) else list(self.getStatesSet())
+        if state in states_list:
+            states_list = [s for s in states_list if s != state]
+            self._set_states(states_list)
     
     """ It deletes the states not included in a subset of states"""
     
     def _deleteStatesNotIncluded(self, subset_states):
-        i = 0
-        states_set = self.getStatesSet()
-        
-        while i < len(states_set):
-            if states_set[i] not in subset_states:
-                self.__delete_state(states_set[i])
-                
-            else:
-                i+=1
+        # Iterate over a copy of the states list so deletions don't mutate the
+        # sequence we're iterating and cause an infinite loop.
+        for state in list(self.getStatesSet()):
+            if state not in subset_states:
+                self.__delete_state(state)
         
     
     """ It deletes the inaccessible states of the automaton by a recursive 

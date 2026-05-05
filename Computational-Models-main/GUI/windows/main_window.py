@@ -17,6 +17,11 @@ from PySide6.QtWidgets import (
 
 from canvas.workspace_canvas import WorkspaceCanvas
 from widgets.draggable_tool_button import DraggableToolButton
+from tempfile import NamedTemporaryFile
+import os
+
+from library.AFND import FiniteAutomaton
+from PySide6.QtWidgets import QDialog, QGridLayout
 
 
 ICONS_DIR = Path(__file__).resolve().parents[1] / "icons"
@@ -96,10 +101,56 @@ class MainWindow(QMainWindow):
 
     def _build_fa_page(self) -> QWidget:
         page = QWidget()
-        page_layout = QHBoxLayout(page)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        page_layout.setSpacing(0)
+        page_vlayout = QVBoxLayout(page)
+        page_vlayout.setContentsMargins(0, 0, 0, 0)
+        page_vlayout.setSpacing(0)
 
+        # Top collapsible tools menu (English)
+        top_menu = QWidget()
+        top_layout = QHBoxLayout(top_menu)
+        top_layout.setContentsMargins(12, 8, 12, 8)
+        top_layout.setSpacing(8)
+
+        header_btn = QPushButton("Tools ▾")
+        header_btn.setCheckable(True)
+        header_btn.setChecked(True)
+        header_btn.setStyleSheet(
+            "font-size:16px; font-weight:600; background-color:#f9fafb; border:1px solid #e5e7eb; padding:8px;"
+        )
+
+        content_widget = QWidget()
+        content_layout = QHBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(8)
+
+        clean_btn = QPushButton("Clean")
+        minimize_btn = QPushButton("Minimize")
+        analyze_btn = QPushButton("Analyze")
+
+        for b in (clean_btn, minimize_btn, analyze_btn):
+            b.setMinimumHeight(36)
+            b.setStyleSheet(
+                "font-size:14px; font-weight:600; background-color:white; border:1px solid #d1d5db; border-radius:8px; padding:6px;"
+            )
+
+        content_layout.addWidget(clean_btn)
+        content_layout.addWidget(minimize_btn)
+        content_layout.addWidget(analyze_btn)
+
+        top_layout.addWidget(header_btn)
+        top_layout.addWidget(content_widget, 1)
+
+        def toggle_top_content():
+            if header_btn.isChecked():
+                header_btn.setText("Tools ▾")
+                content_widget.show()
+            else:
+                header_btn.setText("Tools ▸")
+                content_widget.hide()
+
+        header_btn.clicked.connect(toggle_top_content)
+
+        # Left vertical tool menu
         tool_menu = QWidget()
         tool_menu.setFixedWidth(90)
         tool_menu.setStyleSheet("background-color: #f3f4f6;")
@@ -178,8 +229,22 @@ class MainWindow(QMainWindow):
         open_button.clicked.connect(lambda: self._open_finite_automaton(workspace))
         save_button.clicked.connect(lambda: self._save_finite_automaton(workspace))
 
-        page_layout.addWidget(tool_menu)
-        page_layout.addWidget(workspace, 1)
+        # connect top actions to handlers
+        clean_btn.clicked.connect(lambda: self._clean_automaton(workspace))
+        minimize_btn.clicked.connect(lambda: self._minimize_automaton(workspace))
+        analyze_btn.clicked.connect(lambda: self._analyze_automaton(workspace))
+
+        main_row = QWidget()
+        main_row_layout = QHBoxLayout(main_row)
+        main_row_layout.setContentsMargins(0, 0, 0, 0)
+        main_row_layout.setSpacing(0)
+        main_row_layout.addWidget(tool_menu)
+        main_row_layout.addWidget(workspace, 1)
+
+        page_vlayout.addWidget(top_menu)
+        page_vlayout.addWidget(main_row, 1)
+
+        page_layout = page_vlayout
 
         return page
 
@@ -238,3 +303,122 @@ class MainWindow(QMainWindow):
             "Abrir automata",
             "Automata cargado correctamente.",
         )
+
+    # --- Tool action handlers ---
+    def _write_tmp_and_load(self, workspace: WorkspaceCanvas, automaton_obj) -> None:
+        """Helper: convert FiniteAutomaton (object) to text and load into workspace"""
+        model = automaton_obj.to_dict()
+        states = model.get("states", [])
+        alphabet = model.get("alphabet", [])
+        finals = model.get("final", [])
+        transitions = model.get("transitions", [])
+
+        lines = [
+            "Q = {" + ",".join(states) + "}",
+            "A = {" + ",".join(alphabet) + "}",
+            "F = {" + ",".join(finals) + "}",
+            "",
+        ]
+
+        for t in transitions:
+            frm = t.get("from")
+            sym = t.get("symbol")
+            tos = t.get("to", [])
+            lines.append(f"({frm},{sym}) -> {{{','.join(tos)}}}")
+
+        text = "\n".join(lines)
+        # load into canvas
+        workspace.load_automaton_text(text)
+
+    def _clean_automaton(self, workspace: WorkspaceCanvas) -> None:
+        text = workspace.build_automaton_text()
+        if not text:
+            QMessageBox.warning(self, "Clean", "No automaton to clean.")
+            return
+
+        with NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8") as tmp:
+            tmp.write(text)
+            tmp_path = tmp.name
+
+        try:
+            fa = FiniteAutomaton.readAutomaton(tmp_path)
+            fa.deleteInaccessibleStates()
+            fa.deleteErrorStates()
+            self._write_tmp_and_load(workspace, fa)
+            QMessageBox.information(self, "Clean", "Removed unreachable and error states.")
+        except Exception as e:
+            QMessageBox.critical(self, "Clean", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _minimize_automaton(self, workspace: WorkspaceCanvas) -> None:
+        text = workspace.build_automaton_text()
+        if not text:
+            QMessageBox.warning(self, "Minimize", "No automaton to minimize.")
+            return
+
+        with NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8") as tmp:
+            tmp.write(text)
+            tmp_path = tmp.name
+
+        try:
+            fa = FiniteAutomaton.readAutomaton(tmp_path)
+            minimal = fa.minimalAutomaton()
+            self._write_tmp_and_load(workspace, minimal)
+            QMessageBox.information(self, "Minimize", "Automaton minimized.")
+        except Exception as e:
+            QMessageBox.critical(self, "Minimize", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _determinize_automaton(self, workspace: WorkspaceCanvas) -> None:
+        # determinize action removed from UI; keep method placeholder in case needed later
+        QMessageBox.information(self, "Determinize", "This action has been removed from the UI.")
+
+    def _analyze_automaton(self, workspace: WorkspaceCanvas) -> None:
+        text = workspace.build_automaton_text()
+        if not text:
+            QMessageBox.warning(self, "Analyze", "No automaton to analyze.")
+            return
+
+        with NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8") as tmp:
+            tmp.write(text)
+            tmp_path = tmp.name
+
+        try:
+            fa = FiniteAutomaton.readAutomaton(tmp_path)
+            fa_for_empty = FiniteAutomaton.readAutomaton(tmp_path)
+            fa_for_infinite = FiniteAutomaton.readAutomaton(tmp_path)
+            fa_for_deterministic = FiniteAutomaton.readAutomaton(tmp_path)
+
+            is_empty = fa_for_empty.emptyLanguaje()
+            is_infinite = fa_for_infinite.infiniteLanguaje()
+            is_deterministic = fa_for_deterministic.deterministicAutomaton()
+
+            # floating dialog with results
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Analysis Results")
+            layout = QGridLayout(dlg)
+            layout.addWidget(QLabel("Is empty language:"), 0, 0)
+            layout.addWidget(QLabel(str(bool(is_empty)).upper()), 0, 1)
+            layout.addWidget(QLabel("Is infinite language:"), 1, 0)
+            layout.addWidget(QLabel(str(bool(is_infinite)).upper()), 1, 1)
+            layout.addWidget(QLabel("Is deterministic:"), 2, 0)
+            layout.addWidget(QLabel(str(bool(is_deterministic)).upper()), 2, 1)
+            dlg.setLayout(layout)
+            dlg.setModal(False)
+            dlg.show()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Analyze", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass

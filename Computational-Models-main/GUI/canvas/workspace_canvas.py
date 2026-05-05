@@ -364,41 +364,41 @@ class WorkspaceCanvas(QWidget):
         painter.setBrush(QColor("#1f2937"))
         painter.drawPolygon(QPolygonF([line_end, arrow_p1, arrow_p2]))
 
-        if symbols:
-            text_anchor = control_point if curve_sign != 0.0 else QPointF(
-                (line_start.x() + line_end.x()) / 2.0,
-                (line_start.y() + line_end.y()) / 2.0,
-            )
-            text_offset = 18.0 if curve_sign == 0.0 else 14.0
-            text_pos = QPointF(
-                text_anchor.x() + perpendicular_x * text_offset,
-                text_anchor.y() + perpendicular_y * text_offset,
-            )
+        display_symbols = symbols if symbols else "ε"
+        text_anchor = control_point if curve_sign != 0.0 else QPointF(
+            (line_start.x() + line_end.x()) / 2.0,
+            (line_start.y() + line_end.y()) / 2.0,
+        )
+        text_offset = 18.0 if curve_sign == 0.0 else 14.0
+        text_pos = QPointF(
+            text_anchor.x() + perpendicular_x * text_offset,
+            text_anchor.y() + perpendicular_y * text_offset,
+        )
 
-            if curve_sign == 0.0:
-                if text_pos.y() >= text_anchor.y():
-                    text_pos = QPointF(
-                        text_anchor.x() - perpendicular_x * text_offset,
-                        text_anchor.y() - perpendicular_y * text_offset,
-                    )
+        if curve_sign == 0.0:
+            if text_pos.y() >= text_anchor.y():
+                text_pos = QPointF(
+                    text_anchor.x() - perpendicular_x * text_offset,
+                    text_anchor.y() - perpendicular_y * text_offset,
+                )
 
-                if abs(perpendicular_y) < 0.2:
-                    text_pos = QPointF(text_pos.x(), text_pos.y() - 10.0)
+            if abs(perpendicular_y) < 0.2:
+                text_pos = QPointF(text_pos.x(), text_pos.y() - 10.0)
 
-            font = painter.font()
-            font.setPointSize(10)
-            font.setBold(True)
-            painter.setFont(font)
+        font = painter.font()
+        font.setPointSize(10)
+        font.setBold(True)
+        painter.setFont(font)
 
-            metrics = painter.fontMetrics()
-            text_width = metrics.horizontalAdvance(symbols)
-            text_height = metrics.height()
+        metrics = painter.fontMetrics()
+        text_width = metrics.horizontalAdvance(display_symbols)
+        text_height = metrics.height()
 
-            painter.setPen(QColor("#111827"))
-            painter.drawText(
-                QPointF(text_pos.x() - text_width / 2.0, text_pos.y() - text_height / 2.0),
-                symbols,
-            )
+        painter.setPen(QColor("#111827"))
+        painter.drawText(
+            QPointF(text_pos.x() - text_width / 2.0, text_pos.y() - text_height / 2.0),
+            display_symbols,
+        )
 
     def _draw_self_loop(self, painter: QPainter, circle: "MovableCircle", symbols: str) -> None:
         center = self._circle_center(circle)
@@ -431,23 +431,23 @@ class WorkspaceCanvas(QWidget):
         painter.setBrush(QColor("#1f2937"))
         painter.drawPolygon(QPolygonF([end, arrow_p1, arrow_p2]))
 
-        if symbols:
-            label_x = center.x() + radius * 1.1
-            label_y = center.y() - radius * 2.25
+        display_symbols = symbols if symbols else "ε"
+        label_x = center.x() + radius * 1.1
+        label_y = center.y() - radius * 2.25
 
-            font = painter.font()
-            font.setPointSize(10)
-            font.setBold(True)
-            painter.setFont(font)
-            painter.setPen(QColor("#111827"))
+        font = painter.font()
+        font.setPointSize(10)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor("#111827"))
 
-            metrics = painter.fontMetrics()
-            text_width = metrics.horizontalAdvance(symbols)
-            text_height = metrics.height()
-            painter.drawText(
-                QPointF(label_x - text_width / 2.0, label_y - text_height / 2.0),
-                symbols,
-            )
+        metrics = painter.fontMetrics()
+        text_width = metrics.horizontalAdvance(display_symbols)
+        text_height = metrics.height()
+        painter.drawText(
+            QPointF(label_x - text_width / 2.0, label_y - text_height / 2.0),
+            display_symbols,
+        )
 
     def remove_circle(self, circle: "MovableCircle") -> None:
         if self._pending_connection_start is circle:
@@ -623,11 +623,15 @@ class WorkspaceCanvas(QWidget):
                 continue
 
             symbols = self._normalize_symbols(connection.get("symbols", ""))
-            if not symbols:
-                continue
 
-            for symbol in [item.strip() for item in symbols.split(",") if item.strip()]:
-                if symbol not in alphabet:
+            if symbols == "":
+                # empty string -> epsilon transition; represent with a single empty symbol
+                symbol_items = [""]
+            else:
+                symbol_items = [item.strip() for item in symbols.split(",") if item.strip()]
+
+            for symbol in symbol_items:
+                if symbol and symbol not in alphabet:
                     alphabet.append(symbol)
                 key = (start_name, symbol)
                 if key not in transition_map:
