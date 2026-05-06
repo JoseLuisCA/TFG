@@ -13,7 +13,18 @@ from PySide6.QtGui import (
     QPen,
     QPolygonF,
 )
-from PySide6.QtWidgets import QInputDialog, QMenu, QWidget
+from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QGridLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QMenu,
+    QVBoxLayout,
+    QWidget,
+)
 
 from widgets.movable_circle import MovableCircle
 
@@ -22,10 +33,12 @@ ICONS_DIR = Path(__file__).resolve().parents[1] / "icons"
 
 
 class WorkspaceCanvas(QWidget):
-    def __init__(self):
+    def __init__(self, automaton_kind: str = "finite"):
         super().__init__()
         self.setAcceptDrops(True)
         self.setFocusPolicy(Qt.StrongFocus)
+        self._automaton_kind = automaton_kind
+        self._initial_stack_symbol = "Z"
         self._active_tool = "hand"
         self._pending_connection_start = None
         self._connections = []
@@ -142,20 +155,31 @@ class WorkspaceCanvas(QWidget):
             return
 
         menu = QMenu(self)
-        edit_action = menu.addAction("Modificar simbolos de transicion")
+        if self._automaton_kind == "stack":
+            edit_action = menu.addAction("Edit stack transition")
+        else:
+            edit_action = menu.addAction("Edit transition symbols")
         selected_action = menu.exec(event.globalPos())
         if selected_action is not edit_action:
             return
 
         current_symbols = self._connections[connection_index].get("symbols", "")
-        symbols, ok = QInputDialog.getText(
-            self,
-            "Modificar transicion",
-            "Introduce los simbolos de la transicion separados por una coma. (a,b,c,d)",
-            text=current_symbols,
-        )
+        if self._automaton_kind == "stack":
+            symbols = self._prompt_stack_transition_dialog("Edit transition", current_symbols)
+            ok = symbols is not None
+        else:
+            symbols, ok = QInputDialog.getText(
+                self,
+                "Edit transition",
+                "Enter transition symbols separated by commas (a,b,c,d).",
+                text=current_symbols,
+            )
         if ok:
-            self._connections[connection_index]["symbols"] = self._normalize_symbols(symbols)
+            normalized = self._normalize_symbols(symbols)
+            if self._automaton_kind == "stack" and symbols.strip() and not normalized:
+                QMessageBox.warning(self, "Invalid transition", "Use format a;A;B (example: a;Z;AZ).")
+                return
+            self._connections[connection_index]["symbols"] = normalized
             self.refresh_view()
 
     def wheelEvent(self, event) -> None:
@@ -239,14 +263,29 @@ class WorkspaceCanvas(QWidget):
             self.refresh_view()
             return
 
-        if not self._has_connection(self._pending_connection_start, circle):
+        existing_connection = self._get_connection(self._pending_connection_start, circle)
+
+        if self._automaton_kind == "stack":
+            symbols = self._prompt_stack_transition_dialog("New transition")
+            ok = symbols is not None
+        elif existing_connection is None:
             symbols, ok = QInputDialog.getText(
                 self,
-                "Nueva transicion",
-                "Introduce los simbolos de la transicion separados por una coma. (a,b,c,d)",
+                "New transition",
+                "Enter transition symbols separated by commas (a,b,c,d).",
             )
-            if ok:
-                normalized_symbols = self._normalize_symbols(symbols)
+        else:
+            symbols, ok = (None, False)
+
+        if ok:
+            normalized_symbols = self._normalize_symbols(symbols)
+            if self._automaton_kind == "stack" and symbols.strip() and not normalized_symbols:
+                QMessageBox.warning(self, "Invalid transition", "Use format a;A;B (example: a;Z;AZ).")
+                self._pending_connection_start = None
+                self.refresh_view()
+                return
+
+            if existing_connection is None:
                 self._connections.append(
                     {
                         "start": self._pending_connection_start,
@@ -254,6 +293,12 @@ class WorkspaceCanvas(QWidget):
                         "symbols": normalized_symbols,
                     }
                 )
+            elif self._automaton_kind == "stack":
+                current_symbols = self._normalize_symbols(existing_connection.get("symbols", ""))
+                merged_symbols = [item.strip() for item in current_symbols.split(",") if item.strip()]
+                if normalized_symbols not in merged_symbols:
+                    merged_symbols.append(normalized_symbols)
+                existing_connection["symbols"] = ",".join(merged_symbols)
         self._pending_connection_start = None
         self.refresh_view()
 
@@ -364,7 +409,7 @@ class WorkspaceCanvas(QWidget):
         painter.setBrush(QColor("#1f2937"))
         painter.drawPolygon(QPolygonF([line_end, arrow_p1, arrow_p2]))
 
-        display_symbols = symbols if symbols else "ε"
+        display_symbols = self._format_connection_symbols(symbols)
         text_anchor = control_point if curve_sign != 0.0 else QPointF(
             (line_start.x() + line_end.x()) / 2.0,
             (line_start.y() + line_end.y()) / 2.0,
@@ -431,7 +476,7 @@ class WorkspaceCanvas(QWidget):
         painter.setBrush(QColor("#1f2937"))
         painter.drawPolygon(QPolygonF([end, arrow_p1, arrow_p2]))
 
-        display_symbols = symbols if symbols else "ε"
+        display_symbols = self._format_connection_symbols(symbols)
         label_x = center.x() + radius * 1.1
         label_y = center.y() - radius * 2.25
 
@@ -572,9 +617,95 @@ class WorkspaceCanvas(QWidget):
                 return True
         return False
 
+    def _get_connection(self, start_circle: "MovableCircle", end_circle: "MovableCircle"):
+        for connection in self._connections:
+            if connection["start"] is start_circle and connection["end"] is end_circle:
+                return connection
+        return None
+
     def _normalize_symbols(self, symbols: str) -> str:
         items = [item.strip() for item in symbols.split(",") if item.strip()]
-        return ",".join(items)
+        if self._automaton_kind != "stack":
+            return ",".join(items)
+
+        normalized = []
+        for item in items:
+            parts = [part.strip() for part in item.split(";")]
+            if len(parts) != 3:
+                continue
+            read_symbol, pop_symbol, push_symbols = parts
+            normalized.append(f"{read_symbol};{pop_symbol};{push_symbols}")
+        return ",".join(normalized)
+
+    def _format_connection_symbols(self, symbols: str) -> str:
+        if self._automaton_kind != "stack":
+            return symbols if symbols else "ε"
+
+        items = [item.strip() for item in symbols.split(",") if item.strip()]
+        if not items:
+            return "λ"
+
+        return " | ".join(self._stack_transition_to_display(item) for item in items)
+
+    def _stack_symbol_to_display(self, symbol: str) -> str:
+        symbol = symbol.strip()
+        return symbol if symbol else "λ"
+
+    def _stack_symbol_from_display(self, symbol: str) -> str:
+        symbol = symbol.strip()
+        if symbol.lower() in {"", "lambda", "λ"}:
+            return ""
+        return symbol
+
+    def _stack_transition_to_display(self, symbol: str) -> str:
+        parts = [part.strip() for part in symbol.split(";")]
+        if len(parts) != 3:
+            return symbol.strip() or "λ"
+
+        read_symbol, pop_symbol, push_symbols = parts
+        read_display = read_symbol if read_symbol else "ε"
+        return (
+            f"{read_display} ; "
+            f"{self._stack_symbol_to_display(pop_symbol)} ; "
+            f"{self._stack_symbol_to_display(push_symbols)}"
+        )
+
+    def _stack_transition_to_internal(self, read_symbol: str, pop_symbol: str, push_symbol: str) -> str:
+        return (
+            f"{self._stack_symbol_from_display(read_symbol)};"
+            f"{self._stack_symbol_from_display(pop_symbol)};"
+            f"{self._stack_symbol_from_display(push_symbol)}"
+        )
+
+    def _split_stack_transition_symbol(self, symbol: str) -> tuple[str, str, str]:
+        first_symbol = symbol.split(",", 1)[0].strip()
+        parts = [part.strip() for part in first_symbol.split(";")]
+        while len(parts) < 3:
+            parts.append("")
+        return parts[0], parts[1], parts[2]
+
+    def _prompt_stack_transition_dialog(self, title: str, current_symbols: str = "") -> str | None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("Enter stack transitions separated by commas using: read;pop;push"))
+        layout.addWidget(QLabel("Example: a;B;BB,b;;AB"))
+
+        symbols_edit = QLineEdit()
+        symbols_edit.setPlaceholderText("a;B;BB,b;A;AB")
+        symbols_edit.setText(current_symbols)
+        layout.addWidget(symbols_edit)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.Accepted:
+            return None
+
+        return symbols_edit.text().strip()
 
     def apply_circle_state_type(self, circle: "MovableCircle", state_type: str) -> None:
         icon_path = self._state_icon_paths.get(state_type)
@@ -603,6 +734,9 @@ class WorkspaceCanvas(QWidget):
         return ordered
 
     def build_automaton_text(self) -> str:
+        if self._automaton_kind == "stack":
+            return self._build_stack_automaton_text()
+
         state_names = self._ordered_state_names_for_export()
         if not state_names:
             return ""
@@ -652,6 +786,80 @@ class WorkspaceCanvas(QWidget):
         for (start_state, symbol), targets in ordered_transitions:
             target_text = ",".join(sorted(targets))
             lines.append(f"({start_state},{symbol}) -> {{{target_text}}}")
+
+        return "\n".join(lines)
+
+    def _build_stack_automaton_text(self) -> str:
+        state_names = self._ordered_state_names_for_export()
+        if not state_names:
+            return ""
+
+        finals = []
+        for circle in self.findChildren(MovableCircle):
+            if getattr(circle, "_state_name", "") and getattr(circle, "_state_type", "normal") in ("final", "initial_final"):
+                if circle._state_name not in finals:
+                    finals.append(circle._state_name)
+        finals.sort()
+
+        transition_map = {}
+        alphabet = []
+        stack_symbols = []
+
+        for connection in self._connections:
+            start_name = getattr(connection["start"], "_state_name", "")
+            end_name = getattr(connection["end"], "_state_name", "")
+            if not start_name or not end_name:
+                continue
+
+            symbols_text = self._normalize_symbols(connection.get("symbols", ""))
+            symbol_items = [item.strip() for item in symbols_text.split(",") if item.strip()]
+
+            for item in symbol_items:
+                parts = [part.strip() for part in item.split(";")]
+                if len(parts) != 3:
+                    continue
+
+                read_symbol, pop_symbol, push_symbols = parts
+                if read_symbol and read_symbol not in alphabet:
+                    alphabet.append(read_symbol)
+                if pop_symbol and pop_symbol not in stack_symbols:
+                    stack_symbols.append(pop_symbol)
+                for push_symbol in push_symbols:
+                    if push_symbol and push_symbol not in stack_symbols:
+                        stack_symbols.append(push_symbol)
+
+                key = (start_name, read_symbol, pop_symbol)
+                target = (end_name, push_symbols)
+                if key not in transition_map:
+                    transition_map[key] = []
+                if target not in transition_map[key]:
+                    transition_map[key].append(target)
+
+        alphabet.sort()
+        stack_symbols.sort()
+
+        initial_state = state_names[0]
+        initial_stack_symbol = self._initial_stack_symbol
+        if not initial_stack_symbol:
+            initial_stack_symbol = stack_symbols[0] if stack_symbols else "Z"
+        if initial_stack_symbol and initial_stack_symbol not in stack_symbols:
+            stack_symbols.insert(0, initial_stack_symbol)
+
+        lines = [
+            "Q = {" + ",".join(state_names) + "}",
+            "A = {" + ",".join(alphabet) + "}",
+            "B = {" + ",".join(stack_symbols) + "}",
+            "q0 = {" + initial_state + "}",
+            "Z0 = {" + initial_stack_symbol + "}",
+            "F = {" + ",".join(finals) + "}",
+            "",
+        ]
+
+        ordered_transitions = sorted(transition_map.items(), key=lambda item: (item[0][0], item[0][1], item[0][2]))
+        for (start_state, read_symbol, pop_symbol), targets in ordered_transitions:
+            targets_sorted = sorted(targets, key=lambda value: value[0])
+            target_text = ";".join(f"({target_state},{push_symbols})" for target_state, push_symbols in targets_sorted)
+            lines.append(f"({start_state},{read_symbol},{pop_symbol}) -> {{{target_text}}}")
 
         return "\n".join(lines)
 
@@ -747,23 +955,28 @@ class WorkspaceCanvas(QWidget):
             if match is not None:
                 max_state_index = max(max_state_index, int(match.group(1)))
         self._next_state_index = max_state_index + 1 if max_state_index >= 0 else len(states)
+        if self._automaton_kind == "stack":
+            self._initial_stack_symbol = model.get("initial_stack_symbol", self._initial_stack_symbol)
 
         self.refresh_view()
 
     def _parse_automaton_text(self, text: str) -> dict:
+        if self._automaton_kind == "stack":
+            return self._parse_stack_automaton_text(text)
+
         lines = [line.strip() for line in text.splitlines() if line.strip()]
 
         q_line = next((line for line in lines if line.startswith("Q")), None)
         f_line = next((line for line in lines if line.startswith("F")), None)
         if q_line is None:
-            raise ValueError("No se encontro la linea de estados: Q = {...}")
+            raise ValueError("States line not found: Q = {...}")
         if f_line is None:
-            raise ValueError("No se encontro la linea de finales: F = {...}")
+            raise ValueError("Final states line not found: F = {...}")
 
         states = self._parse_braced_values(q_line)
         finals = self._parse_braced_values(f_line)
         if not states:
-            raise ValueError("El automata no contiene estados en la linea Q")
+            raise ValueError("The automaton has no states in line Q")
 
         transition_map = {}
         transition_lines = [line for line in lines if line.startswith("(") and "->" in line]
@@ -774,12 +987,12 @@ class WorkspaceCanvas(QWidget):
             right_text = right_text.strip()
 
             if not (left_text.startswith("(") and left_text.endswith(")")):
-                raise ValueError(f"Transicion invalida: {transition_line}")
+                raise ValueError(f"Invalid transition: {transition_line}")
 
             left_content = left_text[1:-1]
             left_parts = [item.strip() for item in left_content.split(",")]
             if len(left_parts) != 2:
-                raise ValueError(f"Transicion invalida: {transition_line}")
+                raise ValueError(f"Invalid transition: {transition_line}")
 
             start_state, symbol = left_parts
             target_states = self._parse_braced_values(right_text)
@@ -808,11 +1021,101 @@ class WorkspaceCanvas(QWidget):
 
         return {"states": states, "finals": finals, "transitions": transitions}
 
+    def _parse_stack_automaton_text(self, text: str) -> dict:
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+        q_line = next((line for line in lines if line.startswith("Q")), None)
+        f_line = next((line for line in lines if line.startswith("F")), None)
+        z0_line = next((line for line in lines if line.startswith("Z0")), None)
+        if q_line is None:
+            raise ValueError("States line not found: Q = {...}")
+        if f_line is None:
+            raise ValueError("Final states line not found: F = {...}")
+
+        states = self._parse_braced_values(q_line)
+        finals = self._parse_braced_values(f_line)
+        if not states:
+            raise ValueError("The automaton has no states in line Q")
+
+        initial_stack_symbol = "Z"
+        if z0_line is not None:
+            z0_values = self._parse_braced_values(z0_line)
+            if z0_values:
+                initial_stack_symbol = z0_values[0]
+
+        transition_map = {}
+        transition_lines = [line for line in lines if line.startswith("(") and "->" in line]
+
+        for transition_line in transition_lines:
+            left_text, right_text = transition_line.split("->", 1)
+            left_text = left_text.strip()
+            right_text = right_text.strip()
+
+            if not (left_text.startswith("(") and left_text.endswith(")")):
+                raise ValueError(f"Invalid transition: {transition_line}")
+
+            left_content = left_text[1:-1]
+            left_parts = [item.strip() for item in left_content.split(",")]
+            if len(left_parts) != 3:
+                raise ValueError(f"Invalid transition: {transition_line}")
+
+            start_state, read_symbol, pop_symbol = left_parts
+            target_tuples = self._parse_stack_target_tuples(right_text)
+
+            for end_state, push_symbols in target_tuples:
+                key = (start_state, end_state)
+                stack_label = f"{read_symbol};{pop_symbol};{push_symbols}"
+                if key not in transition_map:
+                    transition_map[key] = []
+                if stack_label not in transition_map[key]:
+                    transition_map[key].append(stack_label)
+
+                if start_state not in states:
+                    states.append(start_state)
+                if end_state not in states:
+                    states.append(end_state)
+
+        transitions = []
+        for (start_state, end_state), symbols in sorted(transition_map.items(), key=lambda item: (item[0][0], item[0][1])):
+            transitions.append(
+                {
+                    "from": start_state,
+                    "to": end_state,
+                    "symbols": sorted(symbols),
+                }
+            )
+
+        return {
+            "states": states,
+            "finals": finals,
+            "transitions": transitions,
+            "initial_stack_symbol": initial_stack_symbol,
+        }
+
+    def _parse_stack_target_tuples(self, text: str) -> list[tuple[str, str]]:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end < start:
+            raise ValueError(f"Invalid stack transition format: {text}")
+
+        content = text[start + 1 : end].strip()
+        if not content:
+            return []
+
+        tuples = []
+        for state_name, push_symbols in re.findall(r"\(([^,\)]+),(.*?)\)", content):
+            tuples.append((state_name.strip(), push_symbols.strip()))
+
+        if not tuples:
+            raise ValueError(f"Invalid stack transition format: {text}")
+
+        return tuples
+
     def _parse_braced_values(self, text: str) -> list[str]:
         start = text.find("{")
         end = text.rfind("}")
         if start == -1 or end == -1 or end < start:
-            raise ValueError(f"Formato invalido en linea: {text}")
+            raise ValueError(f"Invalid line format: {text}")
 
         content = text[start + 1 : end].strip()
         if not content:

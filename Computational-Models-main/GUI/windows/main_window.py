@@ -27,6 +27,7 @@ import os
 from library.AFND import FiniteAutomaton
 from library.AFD_to_reg import dfaToRegex
 from library.reg_to_AFND import regexToAutomaton
+from library.automatonStack import AutomatonStack
 from PySide6.QtWidgets import QDialog, QGridLayout
 
 
@@ -57,9 +58,11 @@ class MainWindow(QMainWindow):
 
         self.home_page = self._build_home_page()
         self.fa_page = self._build_fa_page()
+        self.stack_page = self._build_stack_page()
 
         self.stack.addWidget(self.home_page)
         self.stack.addWidget(self.fa_page)
+        self.stack.addWidget(self.stack_page)
         self.stack.setCurrentWidget(self.home_page)
 
     def _build_home_page(self) -> QWidget:
@@ -98,6 +101,7 @@ class MainWindow(QMainWindow):
         buttons_layout.addWidget(button3)
 
         button1.clicked.connect(lambda: self.stack.setCurrentWidget(self.fa_page))
+        button2.clicked.connect(lambda: self.stack.setCurrentWidget(self.stack_page))
         button3.clicked.connect(self.close)
 
         main_layout.addWidget(title)
@@ -244,6 +248,143 @@ class MainWindow(QMainWindow):
         page_layout = page_vlayout
 
         return page
+
+    def _build_stack_page(self) -> QWidget:
+        page = QWidget()
+        page_vlayout = QVBoxLayout(page)
+        page_vlayout.setContentsMargins(0, 0, 0, 0)
+        page_vlayout.setSpacing(0)
+
+        # Top operations bar for stack automata
+        top_menu = QWidget()
+        top_layout = QHBoxLayout(top_menu)
+        top_layout.setContentsMargins(12, 8, 12, 8)
+        top_layout.setSpacing(8)
+
+        content_widget = QWidget()
+        content_layout = QHBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(8)
+
+        simplify_btn = QPushButton("Simplify")
+        to_grammar_btn = QPushButton("To Grammar")
+        check_word_btn = QPushButton("Check Word")
+        analyze_btn = QPushButton("Analyze")
+
+        for b in (simplify_btn, to_grammar_btn, check_word_btn, analyze_btn):
+            b.setMinimumHeight(36)
+            b.setStyleSheet(
+                "font-size:14px; font-weight:600; background-color:white; border:1px solid #d1d5db; border-radius:8px; padding:6px;"
+            )
+
+        content_layout.addWidget(simplify_btn)
+        content_layout.addWidget(to_grammar_btn)
+        content_layout.addWidget(check_word_btn)
+        content_layout.addWidget(analyze_btn)
+        top_layout.addWidget(content_widget, 1)
+
+        # Left vertical tool menu
+        tool_menu = QWidget()
+        tool_menu.setFixedWidth(90)
+        tool_menu.setStyleSheet("background-color: #f3f4f6;")
+        tool_layout = QVBoxLayout(tool_menu)
+        tool_layout.setContentsMargins(12, 12, 12, 12)
+        tool_layout.setSpacing(12)
+
+        mouse_button = QPushButton()
+        mouse_button.setIcon(QIcon(str(ICONS_DIR / "hand.png")))
+        mouse_button.setIconSize(QSize(32, 32))
+        circle_button = DraggableToolButton("", "circle")
+        circle_button.setIcon(QIcon(str(ICONS_DIR / "state.png")))
+        circle_button.setIconSize(QSize(32, 32))
+        arrow_button = QPushButton()
+        arrow_button.setIcon(QIcon(str(ICONS_DIR / "curved-arrow.png")))
+        arrow_button.setIconSize(QSize(32, 32))
+        delete_button = QPushButton("X")
+        open_button = QPushButton("Open")
+        save_button = QPushButton("Save")
+        back_button = QPushButton("Back")
+
+        mouse_button.clicked.connect(
+            lambda: self._set_active_tool_button(mouse_button, [arrow_button, delete_button])
+        )
+        arrow_button.clicked.connect(
+            lambda: self._set_active_tool_button(arrow_button, [mouse_button, delete_button])
+        )
+        delete_button.clicked.connect(
+            lambda: self._set_active_tool_button(delete_button, [mouse_button, arrow_button])
+        )
+
+        for tool_button in (mouse_button, circle_button, arrow_button, delete_button):
+            tool_button.setMinimumHeight(56)
+            tool_button.setStyleSheet(self._tool_button_style)
+            tool_layout.addWidget(tool_button)
+
+        self._set_active_tool_button(mouse_button, [arrow_button, delete_button])
+
+        tool_layout.addStretch(1)
+
+        open_button.setMinimumHeight(44)
+        open_button.setStyleSheet(
+            "font-size: 16px;"
+            "font-weight: 600;"
+            "background-color: white;"
+            "border: 1px solid #d1d5db;"
+            "border-radius: 10px;"
+        )
+        tool_layout.addWidget(open_button)
+
+        save_button.setMinimumHeight(44)
+        save_button.setStyleSheet(
+            "font-size: 16px;"
+            "font-weight: 600;"
+            "background-color: white;"
+            "border: 1px solid #d1d5db;"
+            "border-radius: 10px;"
+        )
+        tool_layout.addWidget(save_button)
+
+        back_button.setMinimumHeight(44)
+        back_button.setStyleSheet(
+            "font-size: 16px;"
+            "font-weight: 600;"
+            "background-color: white;"
+            "border: 1px solid #d1d5db;"
+            "border-radius: 10px;"
+        )
+        back_button.clicked.connect(lambda: self.stack.setCurrentWidget(self.home_page))
+        tool_layout.addWidget(back_button)
+
+        workspace = WorkspaceCanvas("stack")
+        mouse_button.clicked.connect(lambda: workspace.set_active_tool("hand"))
+        arrow_button.clicked.connect(lambda: workspace.set_active_tool("arrow"))
+        delete_button.clicked.connect(lambda: workspace.set_active_tool("delete"))
+        open_button.clicked.connect(lambda: self._open_finite_automaton(workspace))
+        save_button.clicked.connect(lambda: self._save_finite_automaton(workspace))
+
+        simplify_btn.clicked.connect(lambda: self._stack_action_not_implemented("Simplify"))
+        to_grammar_btn.clicked.connect(lambda: self._stack_action_not_implemented("To Grammar"))
+        check_word_btn.clicked.connect(lambda: self._check_word_stack_automaton(workspace))
+        analyze_btn.clicked.connect(lambda: self._analyze_stack_automaton(workspace))
+
+        main_row = QWidget()
+        main_row_layout = QHBoxLayout(main_row)
+        main_row_layout.setContentsMargins(0, 0, 0, 0)
+        main_row_layout.setSpacing(0)
+        main_row_layout.addWidget(tool_menu)
+        main_row_layout.addWidget(workspace, 1)
+
+        page_vlayout.addWidget(top_menu)
+        page_vlayout.addWidget(main_row, 1)
+
+        return page
+
+    def _stack_action_not_implemented(self, action_name: str) -> None:
+        QMessageBox.information(
+            self,
+            "Stack Automaton",
+            f"{action_name} for stack automata will be implemented in this page.",
+        )
 
     def _set_active_tool_button(self, active_button: QPushButton, inactive_buttons: list[QPushButton]) -> None:
         active_button.setStyleSheet(self._active_tool_button_style)
@@ -550,6 +691,76 @@ class MainWindow(QMainWindow):
             dlg.setModal(False)
             dlg.show()
 
+        except Exception as e:
+            QMessageBox.critical(self, "Analyze", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _check_word_stack_automaton(self, workspace: WorkspaceCanvas) -> None:
+        text = workspace.build_automaton_text()
+        if not text:
+            QMessageBox.warning(self, "Check Word", "No stack automaton to check.")
+            return
+
+        word, ok = QInputDialog.getText(
+            self,
+            "Check Word",
+            "Enter the string to test:",
+            text="",
+        )
+        if not ok:
+            return
+
+        with NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8") as tmp:
+            tmp.write(text)
+            tmp_path = tmp.name
+
+        try:
+            automaton_stack = AutomatonStack.readAutomaton(tmp_path)
+            accepted = automaton_stack.checkBelonging(word)
+            message = (
+                "The stack automaton accepts the string."
+                if accepted
+                else "The stack automaton rejects the string."
+            )
+            QMessageBox.information(self, "Check Word", message)
+        except Exception as e:
+            QMessageBox.critical(self, "Check Word", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _analyze_stack_automaton(self, workspace: WorkspaceCanvas) -> None:
+        text = workspace.build_automaton_text()
+        if not text:
+            QMessageBox.warning(self, "Analyze", "No stack automaton to analyze.")
+            return
+
+        with NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8") as tmp:
+            tmp.write(text)
+            tmp_path = tmp.name
+
+        try:
+            automaton_stack = AutomatonStack.readAutomaton(tmp_path)
+            is_deterministic = automaton_stack.isDeterministic()
+            uses_final_states = len(automaton_stack.getFinalStates()) > 0
+            acceptance_criterion = "Final states" if uses_final_states else "Empty stack"
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Stack Analysis Results")
+            layout = QGridLayout(dlg)
+            layout.addWidget(QLabel("Is deterministic:"), 0, 0)
+            layout.addWidget(QLabel(str(bool(is_deterministic)).upper()), 0, 1)
+            layout.addWidget(QLabel("Acceptance criterion:"), 1, 0)
+            layout.addWidget(QLabel(acceptance_criterion), 1, 1)
+            dlg.setLayout(layout)
+            dlg.setModal(False)
+            dlg.show()
         except Exception as e:
             QMessageBox.critical(self, "Analyze", f"Operation failed: {e}")
         finally:
