@@ -26,6 +26,27 @@ def getPowerset(some_set):
 
         return subsets
 
+def split_respecting_parentheses(text: str, separator: str = ","):
+    """Split text by separator, but not inside parentheses."""
+    parts = []
+    current = []
+    depth = 0
+    for ch in text:
+        if ch == "(":
+            depth += 1
+            current.append(ch)
+        elif ch == ")":
+            depth -= 1
+            current.append(ch)
+        elif ch == separator and depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(ch)
+    if current:
+        parts.append("".join(current).strip())
+    return parts
+
 "Extract a list from a line given the separator and the key character"
 
 def extractSubsetFromLine(line, separator, key_character):
@@ -40,7 +61,7 @@ def extractSubsetFromLine(line, separator, key_character):
             
         i = i+1
         
-    line_elements = line[i:-2] # skip until the character { in the line, remove the last character '}'
+    line_elements = line[i:line.index('}')]
     list_elements_read = line_elements.split(separator)
     num_elements_read = len(list_elements_read)
                 

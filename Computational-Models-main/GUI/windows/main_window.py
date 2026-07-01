@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import QFont, QIcon, QAction
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -10,13 +10,17 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialogButtonBox,
     QLabel,
+    QMenu,
     QMessageBox,
     QMainWindow,
+    QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
+    QApplication,
 )
 
 from canvas.workspace_canvas import WorkspaceCanvas
@@ -28,6 +32,9 @@ from library.AFND import FiniteAutomaton
 from library.AFD_to_reg import dfaToRegex
 from library.reg_to_AFND import regexToAutomaton
 from library.automatonStack import AutomatonStack
+from library.AutomatonStack_ICGrammar import grammarAutomatonStack
+from library.grammar import GenerativeGrammar
+from library.automaton_linear_grammar import grammarLinearRight, grammarLinearLeft, computeAssociatedAFNDLinearRight, computeAssociatedAFNDLinearLeft
 from PySide6.QtWidgets import QDialog, QGridLayout
 
 
@@ -59,10 +66,12 @@ class MainWindow(QMainWindow):
         self.home_page = self._build_home_page()
         self.fa_page = self._build_fa_page()
         self.stack_page = self._build_stack_page()
+        self.grammar_page = self._build_grammar_page()
 
         self.stack.addWidget(self.home_page)
         self.stack.addWidget(self.fa_page)
         self.stack.addWidget(self.stack_page)
+        self.stack.addWidget(self.grammar_page)
         self.stack.setCurrentWidget(self.home_page)
 
     def _build_home_page(self) -> QWidget:
@@ -85,9 +94,10 @@ class MainWindow(QMainWindow):
 
         button1 = QPushButton("Finite Automaton")
         button2 = QPushButton("Stack Automaton")
-        button3 = QPushButton("Exit")
+        button3 = QPushButton("Grammar")
+        button4 = QPushButton("Exit")
 
-        for button in (button1, button2, button3):
+        for button in (button1, button2, button3, button4):
             button.setMinimumHeight(64)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             button.setStyleSheet(
@@ -99,15 +109,35 @@ class MainWindow(QMainWindow):
         buttons_layout.addWidget(button1)
         buttons_layout.addWidget(button2)
         buttons_layout.addWidget(button3)
+        buttons_layout.addWidget(button4)
 
         button1.clicked.connect(lambda: self.stack.setCurrentWidget(self.fa_page))
         button2.clicked.connect(lambda: self.stack.setCurrentWidget(self.stack_page))
-        button3.clicked.connect(self.close)
+        button3.clicked.connect(lambda: self.stack.setCurrentWidget(self.grammar_page))
+        button4.clicked.connect(self.close)
 
         main_layout.addWidget(title)
         main_layout.addWidget(buttons, 1)
 
         return container
+
+    def _make_category_button(self, label: str, actions: list[tuple[str, callable]]) -> QToolButton:
+        btn = QToolButton()
+        btn.setText(label)
+        btn.setPopupMode(QToolButton.InstantPopup)
+        btn.setMinimumHeight(36)
+        btn.setStyleSheet(
+            "QToolButton{font-size:14px;font-weight:600;background-color:white;"
+            "border:1px solid #d1d5db;border-radius:8px;padding:6px 12px;}"
+            "QToolButton::menu-indicator{image:none;}"
+        )
+        menu = QMenu(btn)
+        for text, slot in actions:
+            act = QAction(text, btn)
+            act.triggered.connect(slot)
+            menu.addAction(act)
+        btn.setMenu(menu)
+        return btn
 
     def _build_fa_page(self) -> QWidget:
         page = QWidget()
@@ -120,33 +150,6 @@ class MainWindow(QMainWindow):
         top_layout = QHBoxLayout(top_menu)
         top_layout.setContentsMargins(12, 8, 12, 8)
         top_layout.setSpacing(8)
-
-        content_widget = QWidget()
-        content_layout = QHBoxLayout(content_widget)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(8)
-
-        clean_btn = QPushButton("Clean")
-        minimize_btn = QPushButton("Minimize")
-        regex_btn = QPushButton("Regular Expression")
-        regex_to_fda_btn = QPushButton("Regex to FDA")
-        check_word_btn = QPushButton("Check Word")
-        analyze_btn = QPushButton("Analyze")
-
-        for b in (clean_btn, minimize_btn, regex_btn, regex_to_fda_btn, check_word_btn, analyze_btn):
-            b.setMinimumHeight(36)
-            b.setStyleSheet(
-                "font-size:14px; font-weight:600; background-color:white; border:1px solid #d1d5db; border-radius:8px; padding:6px;"
-            )
-
-        content_layout.addWidget(clean_btn)
-        content_layout.addWidget(minimize_btn)
-        content_layout.addWidget(regex_btn)
-        content_layout.addWidget(regex_to_fda_btn)
-        content_layout.addWidget(check_word_btn)
-        content_layout.addWidget(analyze_btn)
-
-        top_layout.addWidget(content_widget, 1)
 
         # Left vertical tool menu
         tool_menu = QWidget()
@@ -227,13 +230,32 @@ class MainWindow(QMainWindow):
         open_button.clicked.connect(lambda: self._open_finite_automaton(workspace))
         save_button.clicked.connect(lambda: self._save_finite_automaton(workspace))
 
-        # connect top actions to handlers
-        clean_btn.clicked.connect(lambda: self._clean_automaton(workspace))
-        minimize_btn.clicked.connect(lambda: self._minimize_automaton(workspace))
-        regex_btn.clicked.connect(lambda: self._regular_expression_automaton(workspace))
-        regex_to_fda_btn.clicked.connect(lambda: self._regex_to_fda_automaton(workspace))
-        check_word_btn.clicked.connect(lambda: self._check_word_automaton(workspace))
-        analyze_btn.clicked.connect(lambda: self._analyze_automaton(workspace))
+        # Category dropdown buttons
+        edit_btn = self._make_category_button("Edit", [
+            ("Clean", lambda: self._clean_automaton(workspace)),
+            ("Minimize", lambda: self._minimize_automaton(workspace)),
+            ("Complement", lambda: self._complement_automaton(workspace)),
+            ("Reverse", lambda: self._reverse_automaton(workspace)),
+        ])
+        convert_btn = self._make_category_button("Convert", [
+            ("Regular Expression", lambda: self._regular_expression_automaton(workspace)),
+            ("Regex to FDA", lambda: self._regex_to_fda_automaton(workspace)),
+            ("To Right Grammar", lambda: self._to_grammar_right_automaton(workspace)),
+            ("To Left Grammar", lambda: self._to_grammar_left_automaton(workspace)),
+        ])
+        combine_btn = self._make_category_button("Combine", [
+            ("Union", lambda: self._union_automaton(workspace)),
+            ("Intersection", lambda: self._intersection_automaton(workspace)),
+            ("Equivalent?", lambda: self._equivalent_automaton(workspace)),
+        ])
+        test_btn = self._make_category_button("Test", [
+            ("Check Word", lambda: self._check_word_automaton(workspace)),
+            ("Analyze", lambda: self._analyze_automaton(workspace)),
+        ])
+
+        for b in (edit_btn, convert_btn, combine_btn, test_btn):
+            top_layout.addWidget(b)
+        top_layout.addStretch(1)
 
         main_row = QWidget()
         main_row_layout = QHBoxLayout(main_row)
@@ -260,28 +282,6 @@ class MainWindow(QMainWindow):
         top_layout = QHBoxLayout(top_menu)
         top_layout.setContentsMargins(12, 8, 12, 8)
         top_layout.setSpacing(8)
-
-        content_widget = QWidget()
-        content_layout = QHBoxLayout(content_widget)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(8)
-
-        simplify_btn = QPushButton("Simplify")
-        to_grammar_btn = QPushButton("To Grammar")
-        check_word_btn = QPushButton("Check Word")
-        analyze_btn = QPushButton("Analyze")
-
-        for b in (simplify_btn, to_grammar_btn, check_word_btn, analyze_btn):
-            b.setMinimumHeight(36)
-            b.setStyleSheet(
-                "font-size:14px; font-weight:600; background-color:white; border:1px solid #d1d5db; border-radius:8px; padding:6px;"
-            )
-
-        content_layout.addWidget(simplify_btn)
-        content_layout.addWidget(to_grammar_btn)
-        content_layout.addWidget(check_word_btn)
-        content_layout.addWidget(analyze_btn)
-        top_layout.addWidget(content_widget, 1)
 
         # Left vertical tool menu
         tool_menu = QWidget()
@@ -362,10 +362,27 @@ class MainWindow(QMainWindow):
         open_button.clicked.connect(lambda: self._open_finite_automaton(workspace))
         save_button.clicked.connect(lambda: self._save_finite_automaton(workspace))
 
-        simplify_btn.clicked.connect(lambda: self._stack_action_not_implemented("Simplify"))
-        to_grammar_btn.clicked.connect(lambda: self._stack_action_not_implemented("To Grammar"))
-        check_word_btn.clicked.connect(lambda: self._check_word_stack_automaton(workspace))
-        analyze_btn.clicked.connect(lambda: self._analyze_stack_automaton(workspace))
+        # Category dropdown buttons
+        edit_btn = self._make_category_button("Edit", [
+            ("Simplify", lambda: self._simplify_stack_automaton(workspace)),
+            ("Complement (det.)", lambda: self._complement_stack_automaton(workspace)),
+        ])
+        convert_btn = self._make_category_button("Convert", [
+            ("To Grammar", lambda: self._to_grammar_stack_automaton(workspace)),
+            ("To Final-State", lambda: self._to_final_state_stack(workspace)),
+            ("To Empty-Stack", lambda: self._to_empty_stack_stack(workspace)),
+        ])
+        combine_btn = self._make_category_button("Combine", [
+            ("Intersect with DFA", lambda: self._intersect_stack_with_dfa(workspace)),
+        ])
+        test_btn = self._make_category_button("Test", [
+            ("Check Word", lambda: self._check_word_stack_automaton(workspace)),
+            ("Analyze", lambda: self._analyze_stack_automaton(workspace)),
+        ])
+
+        for b in (edit_btn, convert_btn, combine_btn, test_btn):
+            top_layout.addWidget(b)
+        top_layout.addStretch(1)
 
         main_row = QWidget()
         main_row_layout = QHBoxLayout(main_row)
@@ -379,12 +396,129 @@ class MainWindow(QMainWindow):
 
         return page
 
-    def _stack_action_not_implemented(self, action_name: str) -> None:
-        QMessageBox.information(
-            self,
-            "Stack Automaton",
-            f"{action_name} for stack automata will be implemented in this page.",
+    def _grammar_to_text(self, grammar) -> str:
+        tmp = NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
+        grammar.writeGrammar(tmp.name)
+        tmp_path = tmp.name
+        tmp.close()
+        with open(tmp_path, "r", encoding="utf-8") as f:
+            text = f.read()
+        os.remove(tmp_path)
+        return text
+
+    def _grammar_from_editor(self, editor: QPlainTextEdit) -> GenerativeGrammar | None:
+        text = editor.toPlainText().strip()
+        if not text:
+            return None
+        tmp = NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
+        tmp.write(text)
+        tmp_path = tmp.name
+        tmp.close()
+        try:
+            g = GenerativeGrammar.readGrammar(tmp_path)
+            return g
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _build_grammar_page(self) -> QWidget:
+        page = QWidget()
+        page_vlayout = QVBoxLayout(page)
+        page_vlayout.setContentsMargins(0, 0, 0, 0)
+        page_vlayout.setSpacing(0)
+
+        # Top operations bar
+        top_menu = QWidget()
+        top_layout = QHBoxLayout(top_menu)
+        top_layout.setContentsMargins(12, 8, 12, 8)
+        top_layout.setSpacing(8)
+
+        # Left toolbar
+        tool_menu = QWidget()
+        tool_menu.setFixedWidth(90)
+        tool_menu.setStyleSheet("background-color: #f3f4f6;")
+        tool_layout = QVBoxLayout(tool_menu)
+        tool_layout.setContentsMargins(12, 12, 12, 12)
+        tool_layout.setSpacing(12)
+
+        open_btn = QPushButton("Open")
+        open_btn.setMinimumHeight(44)
+        open_btn.setStyleSheet(
+            "font-size: 16px; font-weight: 600; background-color: white; border: 1px solid #d1d5db; border-radius: 10px;"
         )
+
+        save_btn = QPushButton("Save")
+        save_btn.setMinimumHeight(44)
+        save_btn.setStyleSheet(
+            "font-size: 16px; font-weight: 600; background-color: white; border: 1px solid #d1d5db; border-radius: 10px;"
+        )
+
+        back_btn = QPushButton("Back")
+        back_btn.setMinimumHeight(44)
+        back_btn.setStyleSheet(
+            "font-size: 16px; font-weight: 600; background-color: white; border: 1px solid #d1d5db; border-radius: 10px;"
+        )
+        back_btn.clicked.connect(lambda: self.stack.setCurrentWidget(self.home_page))
+
+        tool_layout.addWidget(open_btn)
+        tool_layout.addWidget(save_btn)
+        tool_layout.addStretch(1)
+        tool_layout.addWidget(back_btn)
+
+        # Grammar text editor
+        editor = QPlainTextEdit()
+        editor.setStyleSheet("font-family: monospace; font-size: 14px; padding: 8px;")
+        editor.setPlaceholderText(
+            "Enter grammar here...\n\n"
+            "Format:\n"
+            "V = {S,A,B}\n"
+            "T = {a,b}\n"
+            "\n"
+            "S -> a<A>|b<B>\n"
+            "A -> a|a<A>\n"
+            "B -> b|b<B>"
+        )
+
+        open_btn.clicked.connect(lambda: self._grammar_open(editor))
+        save_btn.clicked.connect(lambda: self._grammar_save(editor))
+
+        # Category dropdown buttons
+        edit_btn = self._make_category_button("Edit", [
+            ("Simplify", lambda: self._grammar_simplify(editor)),
+            ("Chomsky", lambda: self._grammar_chomsky(editor)),
+            ("Greibach", lambda: self._grammar_greibach(editor)),
+        ])
+        check_btn = self._make_category_button("Check", [
+            ("CYK", lambda: self._grammar_cyk(editor)),
+            ("Earley", lambda: self._grammar_earley(editor)),
+        ])
+        combine_btn = self._make_category_button("Combine", [
+            ("Union", lambda: self._grammar_union(editor)),
+            ("Concatenation", lambda: self._grammar_concat(editor)),
+            ("Closure", lambda: self._grammar_closure(editor)),
+        ])
+        convert_btn = self._make_category_button("Convert", [
+            ("To AFND Right", lambda: self._grammar_to_afnd_right(editor)),
+            ("To AFND Left", lambda: self._grammar_to_afnd_left(editor)),
+        ])
+
+        for b in (edit_btn, check_btn, combine_btn, convert_btn):
+            top_layout.addWidget(b)
+        top_layout.addStretch(1)
+
+        main_row = QWidget()
+        main_row_layout = QHBoxLayout(main_row)
+        main_row_layout.setContentsMargins(0, 0, 0, 0)
+        main_row_layout.setSpacing(0)
+        main_row_layout.addWidget(tool_menu)
+        main_row_layout.addWidget(editor, 1)
+
+        page_vlayout.addWidget(top_menu)
+        page_vlayout.addWidget(main_row, 1)
+
+        return page
 
     def _set_active_tool_button(self, active_button: QPushButton, inactive_buttons: list[QPushButton]) -> None:
         active_button.setStyleSheet(self._active_tool_button_style)
@@ -699,6 +833,400 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+    def _read_fa_from_workspace(self, workspace: WorkspaceCanvas):
+        """Helper: build text from canvas, write to temp file, return (FiniteAutomaton, tmp_path) or (None, None)."""
+        text = workspace.build_automaton_text()
+        if not text:
+            return None, None
+        tmp = NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
+        tmp.write(text)
+        tmp_path = tmp.name
+        tmp.close()
+        try:
+            fa = FiniteAutomaton.readAutomaton(tmp_path)
+            return fa, tmp_path
+        except Exception:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+            raise
+
+    def _load_second_automaton_dialog(self) -> FiniteAutomaton | None:
+        """Open a file dialog to load a second finite automaton. Returns FiniteAutomaton or None."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select second automaton", "",
+            "Text files (*.txt);;All files (*.*)"
+        )
+        if not path:
+            return None
+        try:
+            return FiniteAutomaton.readAutomaton(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load second automaton: {e}")
+            return None
+
+    def _show_grammar_dialog(self, title: str, grammar: GenerativeGrammar) -> None:
+        """Show a GenerativeGrammar in a read-only dialog."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        layout = QVBoxLayout(dlg)
+        label = QLabel()
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        label.setWordWrap(True)
+        label.setStyleSheet("font-family: monospace; white-space: pre; background: #f9f9f9; padding: 8px;")
+        layout.addWidget(label, 1)
+        tmp_g = NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
+        grammar.writeGrammar(tmp_g.name)
+        tmp_g.close()
+        with open(tmp_g.name, "r", encoding="utf-8") as f:
+            label.setText(f.read())
+        os.remove(tmp_g.name)
+        dlg.setLayout(layout)
+        dlg.setModal(False)
+        dlg.resize(700, 500)
+        dlg.show()
+
+    def _complement_automaton(self, workspace: WorkspaceCanvas) -> None:
+        fa, tmp_path = self._read_fa_from_workspace(workspace)
+        if fa is None:
+            QMessageBox.warning(self, "Complement", "No automaton to complement.")
+            return
+        try:
+            result = fa.complementaryAutomaton()
+            self._write_tmp_and_load(workspace, result)
+            QMessageBox.information(self, "Complement", "Complement computed.")
+        except Exception as e:
+            QMessageBox.critical(self, "Complement", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _reverse_automaton(self, workspace: WorkspaceCanvas) -> None:
+        fa, tmp_path = self._read_fa_from_workspace(workspace)
+        if fa is None:
+            QMessageBox.warning(self, "Reverse", "No automaton to reverse.")
+            return
+        try:
+            result = fa.computeReverseAutomaton()
+            if result is None:
+                QMessageBox.warning(self, "Reverse", "Reverse requires exactly one final state.")
+                return
+            self._write_tmp_and_load(workspace, result)
+            QMessageBox.information(self, "Reverse", "Reverse computed.")
+        except Exception as e:
+            QMessageBox.critical(self, "Reverse", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _union_automaton(self, workspace: WorkspaceCanvas) -> None:
+        fa_a, tmp_path = self._read_fa_from_workspace(workspace)
+        if fa_a is None:
+            QMessageBox.warning(self, "Union", "No automaton A on the canvas.")
+            return
+        fa_b = self._load_second_automaton_dialog()
+        if fa_b is None:
+            return
+        try:
+            result = fa_a.unionAutomaton(fa_b)
+            self._write_tmp_and_load(workspace, result)
+            QMessageBox.information(self, "Union", "Union computed.")
+        except Exception as e:
+            QMessageBox.critical(self, "Union", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _intersection_automaton(self, workspace: WorkspaceCanvas) -> None:
+        fa_a, tmp_path = self._read_fa_from_workspace(workspace)
+        if fa_a is None:
+            QMessageBox.warning(self, "Intersection", "No automaton A on the canvas.")
+            return
+        fa_b = self._load_second_automaton_dialog()
+        if fa_b is None:
+            return
+        try:
+            result = fa_a.intersectionAutomaton(fa_b)
+            self._write_tmp_and_load(workspace, result)
+            QMessageBox.information(self, "Intersection", "Intersection computed.")
+        except Exception as e:
+            QMessageBox.critical(self, "Intersection", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _equivalent_automaton(self, workspace: WorkspaceCanvas) -> None:
+        fa_a, tmp_path = self._read_fa_from_workspace(workspace)
+        if fa_a is None:
+            QMessageBox.warning(self, "Equivalent?", "No automaton A on the canvas.")
+            return
+        fa_b = self._load_second_automaton_dialog()
+        if fa_b is None:
+            return
+        try:
+            equivalent = fa_a.sameLanguaje(fa_b)
+            msg = "The automata recognise the SAME language." if equivalent else "The automata recognise DIFFERENT languages."
+            QMessageBox.information(self, "Equivalent?", msg)
+        except Exception as e:
+            QMessageBox.critical(self, "Equivalent?", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _to_grammar_right_automaton(self, workspace: WorkspaceCanvas) -> None:
+        fa, tmp_path = self._read_fa_from_workspace(workspace)
+        if fa is None:
+            QMessageBox.warning(self, "To Right Grammar", "No automaton to convert.")
+            return
+        try:
+            grammar = grammarLinearRight(fa)
+            self._show_grammar_dialog("Right-Linear Grammar", grammar)
+        except Exception as e:
+            QMessageBox.critical(self, "To Right Grammar", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _to_grammar_left_automaton(self, workspace: WorkspaceCanvas) -> None:
+        fa, tmp_path = self._read_fa_from_workspace(workspace)
+        if fa is None:
+            QMessageBox.warning(self, "To Left Grammar", "No automaton to convert.")
+            return
+        try:
+            grammar = grammarLinearLeft(fa)
+            self._show_grammar_dialog("Left-Linear Grammar", grammar)
+        except Exception as e:
+            QMessageBox.critical(self, "To Left Grammar", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _simplify_stack_automaton(self, workspace: WorkspaceCanvas) -> None:
+        text = workspace.build_automaton_text()
+        if not text:
+            QMessageBox.warning(self, "Simplify", "No stack automaton to simplify.")
+            return
+
+        with NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8") as tmp:
+            tmp.write(text)
+            tmp_path = tmp.name
+
+        try:
+            automaton_stack = AutomatonStack.readAutomaton(tmp_path)
+            automaton_stack.simplify()
+
+            tmp2 = NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
+            automaton_stack.writeAutomaton(tmp2.name)
+            tmp2_path = tmp2.name
+            tmp2.close()
+
+            workspace.load_automaton_from_file(tmp2_path)
+            QMessageBox.information(self, "Simplify", "Removed inaccessible and dead states.")
+            os.remove(tmp2_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Simplify", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _to_grammar_stack_automaton(self, workspace: WorkspaceCanvas) -> None:
+        text = workspace.build_automaton_text()
+        if not text:
+            QMessageBox.warning(self, "To Grammar", "No stack automaton to convert.")
+            return
+
+        with NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8") as tmp:
+            tmp.write(text)
+            tmp_path = tmp.name
+
+        try:
+            automaton_stack = AutomatonStack.readAutomaton(tmp_path)
+            grammar = grammarAutomatonStack(automaton_stack)
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Generated Grammar")
+            layout = QVBoxLayout(dlg)
+
+            text_edit = QLabel()
+            text_edit.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            text_edit.setWordWrap(True)
+            text_edit.setStyleSheet("font-family: monospace; white-space: pre; background: #f9f9f9; padding: 8px;")
+            layout.addWidget(text_edit, 1)
+
+            tmp_g = NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
+            grammar.writeGrammar(tmp_g.name)
+            tmp_g.close()
+            with open(tmp_g.name, "r", encoding="utf-8") as f:
+                text_edit.setText(f.read())
+            os.remove(tmp_g.name)
+
+            dlg.setLayout(layout)
+            dlg.setModal(False)
+            dlg.resize(700, 500)
+            dlg.show()
+        except Exception as e:
+            QMessageBox.critical(self, "To Grammar", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _to_final_state_stack(self, workspace: WorkspaceCanvas) -> None:
+        """Convert PDA from empty-stack to final-state acceptance."""
+        text = workspace.build_automaton_text()
+        if not text:
+            QMessageBox.warning(self, "To Final-State", "No stack automaton to convert.")
+            return
+
+        with NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8") as tmp:
+            tmp.write(text)
+            tmp_path = tmp.name
+
+        try:
+            pda = AutomatonStack.readAutomaton(tmp_path)
+            result = pda.equivalentAutomatonFinalStates()
+
+            tmp2 = NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
+            result.writeAutomaton(tmp2.name)
+            tmp2_path = tmp2.name
+            tmp2.close()
+
+            workspace.load_automaton_from_file(tmp2_path)
+            QMessageBox.information(self, "To Final-State", "Converted to final-state acceptance.")
+            os.remove(tmp2_path)
+        except Exception as e:
+            QMessageBox.critical(self, "To Final-State", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _to_empty_stack_stack(self, workspace: WorkspaceCanvas) -> None:
+        """Convert PDA from final-state to empty-stack acceptance."""
+        text = workspace.build_automaton_text()
+        if not text:
+            QMessageBox.warning(self, "To Empty-Stack", "No stack automaton to convert.")
+            return
+
+        with NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8") as tmp:
+            tmp.write(text)
+            tmp_path = tmp.name
+
+        try:
+            pda = AutomatonStack.readAutomaton(tmp_path)
+            result = pda.equivalentAutomatonEmptyStack()
+
+            tmp2 = NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
+            result.writeAutomaton(tmp2.name)
+            tmp2_path = tmp2.name
+            tmp2.close()
+
+            workspace.load_automaton_from_file(tmp2_path)
+            QMessageBox.information(self, "To Empty-Stack", "Converted to empty-stack acceptance.")
+            os.remove(tmp2_path)
+        except Exception as e:
+            QMessageBox.critical(self, "To Empty-Stack", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _complement_stack_automaton(self, workspace: WorkspaceCanvas) -> None:
+        """Complement of a deterministic PDA."""
+        text = workspace.build_automaton_text()
+        if not text:
+            QMessageBox.warning(self, "Complement", "No stack automaton to complement.")
+            return
+
+        with NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8") as tmp:
+            tmp.write(text)
+            tmp_path = tmp.name
+
+        try:
+            pda = AutomatonStack.readAutomaton(tmp_path)
+            result = pda.complementaryDeterministic()
+            if result is None:
+                QMessageBox.warning(self, "Complement", "The PDA is not deterministic. Complement requires a deterministic PDA.")
+                return
+
+            tmp2 = NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
+            result.writeAutomaton(tmp2.name)
+            tmp2_path = tmp2.name
+            tmp2.close()
+
+            workspace.load_automaton_from_file(tmp2_path)
+            QMessageBox.information(self, "Complement", "Complement computed.")
+            os.remove(tmp2_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Complement", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _intersect_stack_with_dfa(self, workspace: WorkspaceCanvas) -> None:
+        """Intersect PDA with a DFA loaded from file."""
+        text = workspace.build_automaton_text()
+        if not text:
+            QMessageBox.warning(self, "Intersect with DFA", "No stack automaton on the canvas.")
+            return
+
+        dfa_path, _ = QFileDialog.getOpenFileName(
+            self, "Select DFA file", "",
+            "Text files (*.txt);;All files (*.*)"
+        )
+        if not dfa_path:
+            return
+
+        with NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8") as tmp:
+            tmp.write(text)
+            tmp_path = tmp.name
+
+        try:
+            pda = AutomatonStack.readAutomaton(tmp_path)
+            dfa = FiniteAutomaton.readAutomaton(dfa_path)
+            result = pda.intersectionFiniteAutomaton(dfa)
+            if result is None:
+                QMessageBox.warning(self, "Intersect with DFA", "Intersection failed. Check alphabet compatibility.")
+                return
+
+            tmp2 = NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
+            result.writeAutomaton(tmp2.name)
+            tmp2_path = tmp2.name
+            tmp2.close()
+
+            workspace.load_automaton_from_file(tmp2_path)
+            QMessageBox.information(self, "Intersect with DFA", "Intersection computed.")
+            os.remove(tmp2_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Intersect with DFA", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
     def _check_word_stack_automaton(self, workspace: WorkspaceCanvas) -> None:
         text = workspace.build_automaton_text()
         if not text:
@@ -768,3 +1296,180 @@ class MainWindow(QMainWindow):
                 os.remove(tmp_path)
             except Exception:
                 pass
+
+    # ── Grammar page handlers ──────────────────────────────────────────────
+
+    def _grammar_open(self, editor: QPlainTextEdit) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open grammar", "",
+            "Text files (*.txt);;All files (*.*)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                editor.setPlainText(f.read())
+        except Exception as e:
+            QMessageBox.critical(self, "Open", f"Failed to open file: {e}")
+
+    def _grammar_save(self, editor: QPlainTextEdit) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save grammar", "",
+            "Text files (*.txt);;All files (*.*)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(editor.toPlainText())
+        except Exception as e:
+            QMessageBox.critical(self, "Save", f"Failed to save file: {e}")
+
+    def _grammar_simplify(self, editor: QPlainTextEdit) -> None:
+        g = self._grammar_from_editor(editor)
+        if g is None:
+            QMessageBox.warning(self, "Simplify", "No grammar to simplify.")
+            return
+        try:
+            g.deleteNullProductions()
+            g.deleteUnitaryProductions()
+            g.deleteUselessSymbolsProductions()
+            editor.setPlainText(self._grammar_to_text(g))
+            QMessageBox.information(self, "Simplify", "Removed null/unit/useless productions.")
+        except Exception as e:
+            QMessageBox.critical(self, "Simplify", f"Operation failed: {e}")
+
+    def _grammar_chomsky(self, editor: QPlainTextEdit) -> None:
+        g = self._grammar_from_editor(editor)
+        if g is None:
+            QMessageBox.warning(self, "Chomsky", "No grammar to transform.")
+            return
+        try:
+            g.transformChomsky()
+            editor.setPlainText(self._grammar_to_text(g))
+            QMessageBox.information(self, "Chomsky", "Converted to Chomsky Normal Form.")
+        except Exception as e:
+            QMessageBox.critical(self, "Chomsky", f"Operation failed: {e}")
+
+    def _grammar_greibach(self, editor: QPlainTextEdit) -> None:
+        g = self._grammar_from_editor(editor)
+        if g is None:
+            QMessageBox.warning(self, "Greibach", "No grammar to transform.")
+            return
+        try:
+            g.transformGreibach()
+            editor.setPlainText(self._grammar_to_text(g))
+            QMessageBox.information(self, "Greibach", "Converted to Greibach Normal Form.")
+        except Exception as e:
+            QMessageBox.critical(self, "Greibach", f"Operation failed: {e}")
+
+    def _grammar_cyk(self, editor: QPlainTextEdit) -> None:
+        g = self._grammar_from_editor(editor)
+        if g is None:
+            QMessageBox.warning(self, "CYK", "No grammar.")
+            return
+        word, ok = QInputDialog.getText(self, "CYK", "Enter word to check:")
+        if not ok:
+            return
+        try:
+            g.transformChomsky()
+            accepted = g.checkBelongingCYK(word)
+            msg = "The word IS generated by the grammar." if accepted else "The word IS NOT generated by the grammar."
+            QMessageBox.information(self, "CYK", msg)
+        except Exception as e:
+            QMessageBox.critical(self, "CYK", f"Operation failed: {e}")
+
+    def _grammar_earley(self, editor: QPlainTextEdit) -> None:
+        g = self._grammar_from_editor(editor)
+        if g is None:
+            QMessageBox.warning(self, "Earley", "No grammar.")
+            return
+        word, ok = QInputDialog.getText(self, "Earley", "Enter word to check:")
+        if not ok:
+            return
+        try:
+            accepted = g.checkBelongingEarly(word)
+            msg = "The word IS generated by the grammar." if accepted else "The word IS NOT generated by the grammar."
+            QMessageBox.information(self, "Earley", msg)
+        except Exception as e:
+            QMessageBox.critical(self, "Earley", f"Operation failed: {e}")
+
+    def _grammar_union(self, editor: QPlainTextEdit) -> None:
+        g = self._grammar_from_editor(editor)
+        if g is None:
+            QMessageBox.warning(self, "Union", "No grammar A in the editor.")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select second grammar", "",
+            "Text files (*.txt);;All files (*.*)"
+        )
+        if not path:
+            return
+        try:
+            g2 = GenerativeGrammar.readGrammar(path)
+            result = g.unionGrammar(g2)
+            editor.setPlainText(self._grammar_to_text(result))
+            QMessageBox.information(self, "Union", "Union computed.")
+        except Exception as e:
+            QMessageBox.critical(self, "Union", f"Operation failed: {e}")
+
+    def _grammar_concat(self, editor: QPlainTextEdit) -> None:
+        g = self._grammar_from_editor(editor)
+        if g is None:
+            QMessageBox.warning(self, "Concatenation", "No grammar A in the editor.")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select second grammar", "",
+            "Text files (*.txt);;All files (*.*)"
+        )
+        if not path:
+            return
+        try:
+            g2 = GenerativeGrammar.readGrammar(path)
+            result = g.concatenationGrammar(g2)
+            editor.setPlainText(self._grammar_to_text(result))
+            QMessageBox.information(self, "Concatenation", "Concatenation computed.")
+        except Exception as e:
+            QMessageBox.critical(self, "Concatenation", f"Operation failed: {e}")
+
+    def _grammar_closure(self, editor: QPlainTextEdit) -> None:
+        g = self._grammar_from_editor(editor)
+        if g is None:
+            QMessageBox.warning(self, "Closure", "No grammar.")
+            return
+        try:
+            result = g.clausureGrammar()
+            editor.setPlainText(self._grammar_to_text(result))
+            QMessageBox.information(self, "Closure", "Kleene closure computed.")
+        except Exception as e:
+            QMessageBox.critical(self, "Closure", f"Operation failed: {e}")
+
+    def _grammar_to_afnd_right(self, editor: QPlainTextEdit) -> None:
+        g = self._grammar_from_editor(editor)
+        if g is None:
+            QMessageBox.warning(self, "To AFND Right", "No grammar.")
+            return
+        try:
+            fa = computeAssociatedAFNDLinearRight(g)
+            ws = self.fa_page.findChild(WorkspaceCanvas)
+            if ws:
+                self._write_tmp_and_load(ws, fa)
+            self.stack.setCurrentWidget(self.fa_page)
+            QMessageBox.information(self, "To AFND Right", "AFND created and loaded into FA page.")
+        except Exception as e:
+            QMessageBox.critical(self, "To AFND Right", f"Operation failed: {e}")
+
+    def _grammar_to_afnd_left(self, editor: QPlainTextEdit) -> None:
+        g = self._grammar_from_editor(editor)
+        if g is None:
+            QMessageBox.warning(self, "To AFND Left", "No grammar.")
+            return
+        try:
+            fa = computeAssociatedAFNDLinearLeft(g)
+            ws = self.fa_page.findChild(WorkspaceCanvas)
+            if ws:
+                self._write_tmp_and_load(ws, fa)
+            self.stack.setCurrentWidget(self.fa_page)
+            QMessageBox.information(self, "To AFND Left", "AFND created and loaded into FA page.")
+        except Exception as e:
+            QMessageBox.critical(self, "To AFND Left", f"Operation failed: {e}")

@@ -90,7 +90,10 @@ class GenerativeGrammar:
         {, the last one is }, and that, in the lines, the elements are
         separated by commas """
         
-        for line in lines:
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line:
+                continue
             first_character = line[0]
                         
             """ For reading the variables or terminal symbols, skip until character '{' """
@@ -99,7 +102,7 @@ class GenerativeGrammar:
                 variables = extractSubsetFromLine(line, ',','{')
                 start_variable = variables[0]
                 
-            elif first_character == 'T': 
+            elif first_character == 'T' and line.strip().startswith('T ='): 
                 terminals = extractSubsetFromLine(line, ',','{')
 
                     
@@ -627,29 +630,29 @@ class GenerativeGrammar:
         for production_rule in self.__production_rules:
            left_part = production_rule.getLeftPart()
            right_part = production_rule.getRightPart()
-            
-           """Compute the list of the nullable symbols in the right part"""
            
-           nullable_symbols_right_part = []
+           """Compute the list of the indices of nullable symbols in the right part"""
+           
+           nullable_indices = []
             
-           for symbol in right_part:
+           for i, symbol in enumerate(right_part):
                 if symbol in nullable_variables:
-                    nullable_symbols_right_part.append(symbol)
+                    nullable_indices.append(i)
                     
-             
-           # Extract the subsets of nullable symbols     
-           subsets_nullable = getPowerset(nullable_symbols_right_part)
+          
+           # Extract the subsets of nullable indices     
+           subsets_nullable = getPowerset(nullable_indices)
                 
-           """For each subset of nullable symbols that is not the total one,
-           Add a new production rule with the same left part and the nullable
-           symbols that are not in set subset, whenever the new production is 
-           not null (has at least one symbol in the right part)"""
+           """For each subset of nullable indices that is not empty,
+           Add a new production rule with the same left part and the 
+           nullable symbols whose index is not in the subset, whenever 
+           the new production is not null (has at least one symbol)"""
            for subset_nullable in subsets_nullable:
                if len(subset_nullable) > 0:
                    symbols_new_right_part = []
                    
-                   for symbol in right_part:
-                       if symbol not in nullable_symbols_right_part or symbol not in subset_nullable:
+                   for i, symbol in enumerate(right_part):
+                       if i not in subset_nullable:
                             symbols_new_right_part.append(symbol)
                    
                    if len(symbols_new_right_part) > 0: # Check that the new production is not null
@@ -804,7 +807,7 @@ class GenerativeGrammar:
        i = 0
        counter_new_variables = 1 # counter for the variables Di to add
          
-       for i in range(len(self.__production_rules)):
+       while i < len(self.__production_rules):
           production_rule = self.__production_rules[i]
           left_part = production_rule.getLeftPart()
           right_part = production_rule.getRightPart()
@@ -1466,26 +1469,52 @@ class GenerativeGrammar:
             For each production B -> deltha: create the register (j,j,B,\epsilon,\deltha)
             e insert it in REGISTERS[j]. Repeat recursively for all registers inserted. """
             
-            if verbose:
-                print("Clausure")
+            changed = True
+            while changed:
+                changed = False
+                
+                if verbose:
+                    print("Clausure")
+                
+                for register in list(total_registers[j]):
+                    for production_rule in production_rules:
+                        left_part = production_rule.getLeftPart()
+                        right_part = production_rule.getRightPart()
+                        
+                        if len(register[4]) > 0:
+                            if left_part == register[4][0]:
+                                new_register = (j,j,left_part, "", right_part)
+                        
+                                if new_register not in total_registers[j]:
+                                    total_registers[j].append(new_register)
+                                    changed = True
+                                    
+                                    if verbose:
+                                        print("Adding ")
+                                        print(new_register)
+          
+                """Step 4. Completion: For each par of registers of the form (i,j,A,\alpha,\epsilon) in REGISTERS[j]
+                and (h,i,B,\gamma, A\delta) in REGISTERS[i], create the new register (h,j,B,\gammaA,\delta) 
+                and insert it into REGISTERS[j]"""
+                
+                if verbose:
+                    print("Completion")
+                
+                for first_register in list(total_registers[j]):
+                    if len(first_register[4]) == 0:
+                        for second_register in list(total_registers[first_register[0]]):
+                            if second_register[1] == first_register[0] and len(second_register[4]) > 0:
+                                if second_register[4][0] == first_register[2]:
+                                    new_register = (second_register[0], j, second_register[2], second_register[3] + first_register[2], second_register[4][1:])
+                                    if new_register not in total_registers[j]:
+                                        total_registers[j].append(new_register)
+                                        changed = True
+                                        
+                                        if verbose:
+                                            print("Adding ")
+                                            print(new_register)
             
-            for register in total_registers[j]:
-                for production_rule in production_rules:
-                    left_part = production_rule.getLeftPart()
-                    right_part = production_rule.getRightPart()
-                    
-                    if len(register[4]) > 0:
-                        if left_part == register[4][0]:
-                            new_register = (j,j,left_part, "", right_part)
-                       
-                            if new_register not in total_registers[j]:
-                                total_registers[j].append(new_register)
-                                
-                                if verbose:
-                                    print("Adding ")
-                                    print(new_register)
-             
-            """ Step 3. Advance: For all register (i,j,A,\alpha,c|gamma) in REGISTERS[j] 
+            """Step 3. Advance: For all register (i,j,A,\alpha,c|gamma) in REGISTERS[j] 
             where c is a terminal symbol that appears in the position j of u,
             create the register (i,j+1,A,\alpha,c,\gamma) and insert it in REGISTERS[j+1]
             j = j+1 """
@@ -1509,22 +1538,43 @@ class GenerativeGrammar:
             
             total_registers.append(next_registers) # append REGISTERS[j+1]
             j = j+1
-            
-            """Step 4. Termination: For each par of registers of the form (i,j,A,\alpha,\epsilon) in REGISTERS[j]
-            and (h,i,B,\gamma, A\delta) in REGISTERS[i], create the new register (h,j,B,\gammaA,\delta) 
-            and insert it into REGISTERS[j]"""
+        
+        """Run clausure and completion at the final position j = length_word"""
+        changed = True
+        while changed:
+            changed = False
             
             if verbose:
-                print("Termination")
+                print("Final Clausure")
             
-            for first_register in total_registers[j]: # register (i,j,A,\alpha, \epsilon)
+            for register in list(total_registers[j]):
+                for production_rule in production_rules:
+                    left_part = production_rule.getLeftPart()
+                    right_part = production_rule.getRightPart()
+                    
+                    if len(register[4]) > 0:
+                        if left_part == register[4][0]:
+                            new_register = (j,j,left_part, "", right_part)
+                            if new_register not in total_registers[j]:
+                                total_registers[j].append(new_register)
+                                changed = True
+                                
+                                if verbose:
+                                    print("Adding ")
+                                    print(new_register)
+            
+            if verbose:
+                print("Final Completion")
+            
+            for first_register in list(total_registers[j]):
                 if len(first_register[4]) == 0:
-                    for i in range(j):
-                        for second_register in total_registers[i]:
-                            if second_register[1] == first_register[0] and len(second_register[4]) > 0:
-                                if second_register[4][0] == first_register[2]: # register (h,i,B,\gamma,A\delta)
-                                    new_register = (second_register[0], j, second_register[2], second_register[3] + first_register[2], second_register[4][1:])
+                    for second_register in list(total_registers[first_register[0]]):
+                        if second_register[1] == first_register[0] and len(second_register[4]) > 0:
+                            if second_register[4][0] == first_register[2]:
+                                new_register = (second_register[0], j, second_register[2], second_register[3] + first_register[2], second_register[4][1:])
+                                if new_register not in total_registers[j]:
                                     total_registers[j].append(new_register)
+                                    changed = True
                                     
                                     if verbose:
                                         print("Adding ")

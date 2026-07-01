@@ -1055,7 +1055,7 @@ class WorkspaceCanvas(QWidget):
                 raise ValueError(f"Invalid transition: {transition_line}")
 
             left_content = left_text[1:-1]
-            left_parts = [item.strip() for item in left_content.split(",")]
+            left_parts = self._split_stack_transition_left(left_content)
             if len(left_parts) != 3:
                 raise ValueError(f"Invalid transition: {transition_line}")
 
@@ -1092,6 +1092,26 @@ class WorkspaceCanvas(QWidget):
             "initial_stack_symbol": initial_stack_symbol,
         }
 
+    def _split_stack_transition_left(self, text: str) -> list[str]:
+        parts = []
+        current = []
+        depth = 0
+        for ch in text:
+            if ch == "(":
+                depth += 1
+                current.append(ch)
+            elif ch == ")":
+                depth -= 1
+                current.append(ch)
+            elif ch == "," and depth == 0:
+                parts.append("".join(current).strip())
+                current = []
+            else:
+                current.append(ch)
+        if current:
+            parts.append("".join(current).strip())
+        return parts
+
     def _parse_stack_target_tuples(self, text: str) -> list[tuple[str, str]]:
         start = text.find("{")
         end = text.rfind("}")
@@ -1103,8 +1123,19 @@ class WorkspaceCanvas(QWidget):
             return []
 
         tuples = []
-        for state_name, push_symbols in re.findall(r"\(([^,\)]+),(.*?)\)", content):
-            tuples.append((state_name.strip(), push_symbols.strip()))
+        for pair in content.split(";"):
+            pair = pair.strip()
+            if not pair:
+                continue
+            if not (pair.startswith("(") and pair.endswith(")")):
+                raise ValueError(f"Invalid stack transition format: {text}")
+            inner = pair[1:-1]
+            parts = self._split_stack_transition_left(inner)
+            if len(parts) < 1:
+                continue
+            state_name = parts[0].strip()
+            push_symbols = parts[1].strip() if len(parts) > 1 else ""
+            tuples.append((state_name, push_symbols))
 
         if not tuples:
             raise ValueError(f"Invalid stack transition format: {text}")

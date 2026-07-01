@@ -1,9 +1,49 @@
 Lista de cosas que hacer:
 
+══════════════════════════
+  HECHO
+══════════════════════════
 
+FA PAGE:
+  - Complement (complementaryAutomaton)
+  - Reverse (computeReverseAutomaton)
+  - Union (unionAutomaton)
+  - Intersection (intersectionAutomaton)
+  - Equivalent? (sameLanguaje)
+  - To Right Linear Grammar (grammarLinearRight)
+  - To Left Linear Grammar (grammarLinearLeft)
+  - Botones reorganizados en dropdowns por categoria (Edit, Convert, Combine, Test)
 
-Meter los nuevos iconos                                                                         CHECK
+STACK PAGE:
+  - Simplify (elimina inaccesibles/muertos)
+  - To Grammar (PDA -> CFG)
+  - Check Word
+  - Analyze
+  - To Final-State / Empty-Stack (equivalentAutomatonFinalStates, equivalentAutomatonEmptyStack)
+  - Complement (det.) (complementaryDeterministic)
+  - Intersect with DFA (intersectionFiniteAutomaton)
+  - Botones reorganizados en dropdowns por categoria (Edit, Convert, Combine, Test)
+  - Arreglado parser de transiciones para estados con parentesis (split_respecting_parentheses)
 
-Meter que con click secundario puedas cambiar estados a finales o iniciales, y viceversa        CHECK
+GENERAL:
+  - Iconos nuevos
+  - Click secundario cambiar estados inicial/final/normal
+  - Click secundario editar transiciones
+  - Automatas de ejemplo creados (FA y PDA)
 
-Con click secundario editar transiciones                                                        CHECK
+══════════════════════════
+  GRAMMAR PAGE (hecho)
+══════════════════════════
+
+  - Botones organizados en dropdowns (Edit, Check, Combine, Convert)
+  - Cargar/guardar gramaticas (readGrammar, writeGrammar)
+  - Simplify: null productions, unitary productions, useless symbols
+  - Forma normal de Chomsky (transformChomsky)
+  - Forma normal de Greibach (transformGreibach)
+  - CYK (checkBelongingCYK)
+  - Earley (checkBelongingEarly)
+  - Union (unionGrammar)
+  - Concatenacion (concatenationGrammar)
+  - Clausura de Kleene (clausureGrammar)
+  - Convertir a AFND lineal (computeAssociatedAFNDLinearRight/Left)
+  - Ejemplos creados: anbn, palindromes, expressions

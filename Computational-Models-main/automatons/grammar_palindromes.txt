@@ -1,0 +1,4 @@
+V = {S}
+T = {a,b}
+
+S -> aSa|bSb|a|b|

@@ -7,7 +7,23 @@ Created on Tue Oct 22 10:32:59 2024
 
 from typing import AbstractSet
 from TransitionStack import TransitionAutomatonStack
-from Utils import extractSubsetFromLine, createStringList
+from Utils import extractSubsetFromLine, createStringList, split_respecting_parentheses
+
+
+def _extract_automaton_set(line, separator, key_character):
+    """Like extractSubsetFromLine but uses split_respecting_parentheses for pair-state names."""
+    elements = []
+    key_found = False
+    i = 1
+    while not key_found:
+        if line[i] == key_character:
+            key_found = True
+        i += 1
+    line_elements = line[i:-2]
+    list_elements_read = split_respecting_parentheses(line_elements, separator)
+    for elem in list_elements_read:
+        elements.append(elem.strip())
+    return elements
 
 
 """ Class for Non-Deterministic Automaton with Stack """
@@ -311,7 +327,7 @@ class AutomatonStack:
             first_character = line[0]
             
             if first_character == 'Q': # extract the states, assuming that the initial state is the first one
-               states = extractSubsetFromLine(line, ",", "{")
+               states = _extract_automaton_set(line, ",", "{")
                
             elif first_character == 'A': # extract the input symbols
                 input_symbols = extractSubsetFromLine(line, ",", "{")
@@ -320,13 +336,13 @@ class AutomatonStack:
                 stack_symbols = extractSubsetFromLine(line, ",", "{")
                 
             elif first_character == 'q': # Extract the initial state 
-                initial_state = extractSubsetFromLine(line, ",", "{")[0]
+                initial_state = _extract_automaton_set(line, ",", "{")[0]
                 
             elif first_character == 'Z': # Extract the initial symbol of the stack
                 initial_symbol_stack = extractSubsetFromLine(line, ",", "{")[0]
                 
             elif first_character == 'F': # extract the final states
-               final_states_set = extractSubsetFromLine(line, ",", "{")
+               final_states_set = _extract_automaton_set(line, ",", "{")
                
                if final_states_set == ['']:
                    final_states_set = []
@@ -340,7 +356,7 @@ class AutomatonStack:
                 """ The inital state is before the first comma, the input symbol is between both commmas,
                 and the symbol of the top of the  stack is after the second comma """
                 
-                parts_transition = string_left.split(',')
+                parts_transition = split_respecting_parentheses(string_left)
                 start_state = parts_transition[0]
                 input_symbol = parts_transition[1]
                 initial_top = parts_transition[2]
@@ -354,9 +370,13 @@ class AutomatonStack:
                 """ Now, for each transition tuple, read the state and the new top of the stack,
                 separated by comma. The characters '(' and ')' are also skiped. """
                 for pair in transition_pairs:
-                    tuple_parts = pair.split(",")
-                    transition_state = tuple_parts[0][1:]
-                    new_top_stack = tuple_parts[1][:-1]
+                    stripped = pair.strip()
+                    if not stripped.startswith("(") or not stripped.endswith(")"):
+                        continue
+                    inner = stripped[1:-1]
+                    tuple_parts = split_respecting_parentheses(inner)
+                    transition_state = tuple_parts[0].strip()
+                    new_top_stack = tuple_parts[1].strip() if len(tuple_parts) > 1 else ""
                     transition_tuple = (transition_state,new_top_stack)
                     transition_tuples.append(transition_tuple)
                     
@@ -968,6 +988,99 @@ class AutomatonStack:
         return new_transition_tuples
         
     
+    def _reachable_states(self):
+        """Returns the set of states reachable from the initial state via BFS."""
+        reachable = {self.__initial_state}
+        queue = [self.__initial_state]
+
+        while queue:
+            current = queue.pop(0)
+            for transition in self._get_transition_list():
+                if transition.getInitialState() != current:
+                    continue
+                for transition_tuple in transition.getTransitionTuples():
+                    target = transition_tuple[0]
+                    if target not in reachable and target in self.__states_set:
+                        reachable.add(target)
+                        queue.append(target)
+
+        return reachable
+
+    def _dead_states(self):
+        """Returns the set of states that cannot reach any final state."""
+        if not self.__final_states:
+            return set()
+
+        productive = set(self.__final_states)
+        changed = True
+        while changed:
+            changed = False
+            for transition in self._get_transition_list():
+                src = transition.getInitialState()
+                if src in productive:
+                    continue
+                for transition_tuple in transition.getTransitionTuples():
+                    if transition_tuple[0] in productive:
+                        if src not in productive:
+                            productive.add(src)
+                            changed = True
+                        break
+
+        return {s for s in self.__states_set if s not in productive}
+
+    def simplify(self):
+        """Simplifies the PDA by removing inaccessible and dead states,
+        and cleaning up unused alphabet/stack symbols."""
+        reachable = self._reachable_states()
+        dead = self._dead_states()
+        keep = reachable - dead
+
+        if self.__initial_state not in keep:
+            keep.add(self.__initial_state)
+
+        old_states = self.__states_set
+        old_finals = self.__final_states
+
+        new_states = {s for s in old_states if s in keep}
+        new_finals = {s for s in old_finals if s in keep}
+
+        new_transitions = []
+        for transition in self._get_transition_list():
+            src = transition.getInitialState()
+            if src not in keep:
+                continue
+            filtered_tuples = [
+                t for t in transition.getTransitionTuples()
+                if t[0] in keep
+            ]
+            if filtered_tuples:
+                transition.setTransitionTuples(filtered_tuples)
+                new_transitions.append(transition)
+
+        used_input_symbols = set()
+        used_stack_symbols = set()
+        used_stack_symbols.add(self.__initial_symbol_stack)
+
+        for transition in new_transitions:
+            sym = transition.getInputSymbol()
+            if sym:
+                used_input_symbols.add(sym)
+            used_stack_symbols.add(transition.getInitialTop())
+            for t in transition.getTransitionTuples():
+                for ch in t[1]:
+                    used_stack_symbols.add(ch)
+
+        self._set_states(list(new_states))
+        self._set_final_states(list(new_finals))
+        self._set_transition_list(new_transitions)
+
+        valid_input = {s for s in self.__alphabet_symbols if s in used_input_symbols}
+        valid_stack = {s for s in self.__stack_symbols if s in used_stack_symbols}
+        self._set_input_alphabet(list(valid_input))
+        self._set_stack_alphabet(list(valid_stack))
+
+        return self
+
     """ It computes the automaton with stack that accepts the intersection of the languaje 
     acepted by the original automaton and the one acepted by a Deterministic Finite Automaton. 
     """
