@@ -233,6 +233,7 @@ class MainWindow(QMainWindow):
         # Category dropdown buttons
         edit_btn = self._make_category_button("Edit", [
             ("Clean", lambda: self._clean_automaton(workspace)),
+            ("Determinize", lambda: self._determinize_automaton(workspace)),
             ("Minimize", lambda: self._minimize_automaton(workspace)),
             ("Complement", lambda: self._complement_automaton(workspace)),
             ("Reverse", lambda: self._reverse_automaton(workspace)),
@@ -655,6 +656,28 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+    def _determinize_automaton(self, workspace: WorkspaceCanvas) -> None:
+        fa, tmp_path = self._read_fa_from_workspace(workspace)
+        if fa is None:
+            QMessageBox.warning(self, "Determinize", "No automaton to determinize.")
+            return
+        if fa.deterministicAutomaton():
+            QMessageBox.information(self, "Determinize", "Already deterministic.")
+            return
+        try:
+            result = fa.transformDeterministic()
+            result.deleteInaccessibleStates()
+            result.deleteErrorStates()
+            self._write_tmp_and_load(workspace, result)
+            QMessageBox.information(self, "Determinize", "Determinized (NFA → DFA).")
+        except Exception as e:
+            QMessageBox.critical(self, "Determinize", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
     def _minimize_automaton(self, workspace: WorkspaceCanvas) -> None:
         text = workspace.build_automaton_text()
         if not text:
@@ -677,10 +700,6 @@ class MainWindow(QMainWindow):
                 os.remove(tmp_path)
             except Exception:
                 pass
-
-    def _determinize_automaton(self, workspace: WorkspaceCanvas) -> None:
-        # determinize action removed from UI; keep method placeholder in case needed later
-        QMessageBox.information(self, "Determinize", "This action has been removed from the UI.")
 
     def _regular_expression_automaton(self, workspace: WorkspaceCanvas) -> None:
         text = workspace.build_automaton_text()

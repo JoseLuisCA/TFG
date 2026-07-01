@@ -47,3 +47,19 @@ GENERAL:
   - Clausura de Kleene (clausureGrammar)
   - Convertir a AFND lineal (computeAssociatedAFNDLinearRight/Left)
   - Ejemplos creados: anbn, palindromes, expressions
+
+══════════════════════════
+  PENDIENTE
+══════════════════════════
+
+FA PAGE:
+  - Determinizar (NFA -> DFA) — HECHO
+
+GRAMMAR PAGE:
+  - Convertir a PDA (gramatica -> automata de pila)
+
+AMBAS (FA, STACK, GRAMMAR):
+  - Simulacion paso a paso (traza visual al chequear una palabra)
+  - Arbol de derivacion (parse tree) al hacer CYK/Earley
+  - Exportar a imagen (PNG/SVG)
+  - Vista del stack durante el analisis de un PDA
