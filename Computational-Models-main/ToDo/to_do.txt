@@ -56,10 +56,10 @@ FA PAGE:
   - Determinizar (NFA -> DFA) — HECHO
 
 GRAMMAR PAGE:
-  - Convertir a PDA (gramatica -> automata de pila)
+  - Convertir a PDA (gramatica -> automata de pila) — HECHO
 
 AMBAS (FA, STACK, GRAMMAR):
-  - Simulacion paso a paso (traza visual al chequear una palabra)
+  - Simulacion paso a paso (traza visual al chequear una palabra) — HECHO (FA + PDA con vista de pila)
   - Arbol de derivacion (parse tree) al hacer CYK/Earley
   - Exportar a imagen (PNG/SVG)
   - Vista del stack durante el analisis de un PDA

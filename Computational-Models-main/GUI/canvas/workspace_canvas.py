@@ -718,6 +718,20 @@ class WorkspaceCanvas(QWidget):
         circle.update()
         self.refresh_view()
 
+    def set_state_highlight(self, state_name: str, color: str = "#22c55e") -> None:
+        for circle in self.findChildren(MovableCircle):
+            if getattr(circle, "_state_name", "") == state_name:
+                circle._highlight_color = QColor(color)
+                circle.update()
+                break
+        self.refresh_view()
+
+    def clear_highlights(self) -> None:
+        for circle in self.findChildren(MovableCircle):
+            circle._highlight_color = None
+            circle.update()
+        self.refresh_view()
+
     def _ordered_state_names_for_export(self) -> list[str]:
         circles = [circle for circle in self.findChildren(MovableCircle) if getattr(circle, "_state_name", "")]
         circles.sort(key=lambda circle: circle._state_name)

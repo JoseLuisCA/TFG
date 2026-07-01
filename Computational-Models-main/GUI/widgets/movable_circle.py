@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QLabel, QMenu, QWidget
 
 
@@ -9,6 +9,7 @@ class MovableCircle(QLabel):
         self._drag_offset = None
         self._state_name = ""
         self._state_type = "normal"
+        self._highlight_color = None
 
     def set_state_name(self, state_name: str) -> None:
         self._state_name = state_name
@@ -122,3 +123,9 @@ class MovableCircle(QLabel):
             if self._state_type in ("initial", "initial_final"):
                 text_rect = text_rect.translated(12, 0)
             painter.drawText(text_rect, Qt.AlignCenter, self._state_name)
+
+        if self._highlight_color:
+            pen = QPen(self._highlight_color, 4)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(self.rect().adjusted(2, 2, -2, -2))

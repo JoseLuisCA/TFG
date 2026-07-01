@@ -32,10 +32,206 @@ from library.AFND import FiniteAutomaton
 from library.AFD_to_reg import dfaToRegex
 from library.reg_to_AFND import regexToAutomaton
 from library.automatonStack import AutomatonStack
-from library.AutomatonStack_ICGrammar import grammarAutomatonStack
+from library.AutomatonStack_ICGrammar import grammarAutomatonStack, automatonGrammar
 from library.grammar import GenerativeGrammar
 from library.automaton_linear_grammar import grammarLinearRight, grammarLinearLeft, computeAssociatedAFNDLinearRight, computeAssociatedAFNDLinearLeft
-from PySide6.QtWidgets import QDialog, QGridLayout
+from PySide6.QtWidgets import QDialog, QGridLayout, QDialogButtonBox, QTextEdit, QTableWidget, QTableWidgetItem, QHeaderView
+
+
+def _compute_pda_trace(automaton_stack, word):
+    """Returns (trace, accepted). Walks forward greedily recording every step;
+    if stuck the trace ends at the stuck configuration."""
+    state = automaton_stack.getInitialState()
+    remaining = word
+    stack = [automaton_stack.getInitialSymbolStack()]
+    transitions = automaton_stack.getTransitions()
+    final_states = automaton_stack.getFinalStates()
+    visited = set()
+
+    trace = []
+
+    while True:
+        # Check acceptance at current config
+        if len(remaining) == 0 and (state in final_states or len(stack) == 0):
+            trace.append({"state": state, "remaining": "", "stack": [], "transition": None})
+            return trace, True
+
+        top = stack[-1] if stack else ""
+        if not stack:
+            break
+
+        key = (state, remaining, tuple(stack))
+        if key in visited:
+            break
+        visited.add(key)
+
+        chosen = None
+        for t in transitions:
+            if t.getInitialState() != state or t.getInitialTop() != top:
+                continue
+            inp = t.getInputSymbol()
+            if inp != "" and (len(remaining) == 0 or inp != remaining[0]):
+                continue
+            for target_state, push_str in t.getTransitionTuples():
+                chosen = (t, target_state, push_str, inp)
+                break
+            if chosen:
+                break
+
+        if chosen is None:
+            break
+
+        t, target_state, push_str, inp = chosen
+        new_stack = stack.copy()
+        new_stack.pop()
+        if push_str:
+            for ch in reversed(push_str):
+                new_stack.append(ch)
+        new_remaining = remaining if inp == "" else remaining[1:]
+
+        trace.append({
+            "state": state,
+            "remaining": remaining,
+            "stack": list(stack),
+            "transition": (state, inp, top, target_state, push_str),
+        })
+        state, remaining, stack = target_state, new_remaining, new_stack
+
+    # Rejected — append stuck config
+    trace.append({"state": state, "remaining": remaining, "stack": list(stack), "transition": None})
+    return trace, False
+
+
+class SimulationDialog(QDialog):
+    def __init__(self, parent, word: str, trace: list, accepted: bool, is_dfa: bool, kind: str = "fa"):
+        super().__init__(parent)
+        title = "Step-by-Step Simulation — FA" if kind == "fa" else "Step-by-Step Simulation — PDA"
+        self.setWindowTitle(title)
+        self.setMinimumSize(600, 400)
+        self._trace = trace
+        self._word = word
+        self._accepted = accepted
+        self._is_dfa = is_dfa
+        self._kind = kind
+        self._current_step = 0
+
+        layout = QVBoxLayout(self)
+
+        self._info = QTextEdit()
+        self._info.setReadOnly(True)
+        self._info.setStyleSheet("font-family: monospace; font-size: 16px;")
+        layout.addWidget(self._info)
+
+        self._stack_table = None
+        if kind == "pda":
+            self._stack_table = QTableWidget()
+            self._stack_table.setColumnCount(1)
+            self._stack_table.setHorizontalHeaderLabels(["Stack (bottom → top)"])
+            self._stack_table.horizontalHeader().setStretchLastSection(True)
+            self._stack_table.setMaximumHeight(180)
+            layout.addWidget(self._stack_table)
+
+        btn_layout = QHBoxLayout()
+        self._prev_btn = QPushButton("< Prev")
+        self._next_btn = QPushButton("Next >")
+        self._close_btn = QPushButton("Close")
+        btn_layout.addWidget(self._prev_btn)
+        btn_layout.addWidget(self._next_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self._close_btn)
+        layout.addLayout(btn_layout)
+
+        self._prev_btn.clicked.connect(self._prev_step)
+        self._next_btn.clicked.connect(self._next_step)
+        self._close_btn.clicked.connect(self.close)
+
+        self._workspace = None
+        self._update_view()
+
+    def set_workspace(self, ws):
+        self._workspace = ws
+
+    def _update_view(self):
+        step = self._current_step
+        total = len(self._trace) - 1
+        entry = self._trace[step]
+
+        if self._kind == "fa":
+            states = entry["states"]
+            consumed = entry["consumed"]
+            remaining = entry["remaining"]
+            state_str = ", ".join(states) if isinstance(states, list) else states
+
+            lines = [
+                f"Step: {step}/{total}",
+                "",
+                f"Consumed: '{consumed}'" if consumed else "Consumed: (start)",
+                f"Remaining: '{remaining}'" if remaining else "Remaining: (end)",
+                "",
+                f"Current state(s): {state_str}",
+            ]
+            text = "\n".join(lines)
+
+            if self._workspace:
+                self._workspace.clear_highlights()
+                state_list = states if isinstance(states, list) else [states]
+                for s in state_list:
+                    if s:
+                        self._workspace.set_state_highlight(s)
+        else:
+            state = entry["state"]
+            remaining = entry["remaining"]
+            stack = entry.get("stack", [])
+            trans = entry.get("transition")
+
+            lines = [
+                f"Step: {step}/{total}",
+                "",
+                f"State: {state}",
+                f"Remaining: '{remaining}'" if remaining else "Remaining: (end)",
+                "",
+            ]
+            if trans:
+                fs, inp, pop, ts, push = trans
+                lines.append(f"Transition: ({fs}, '{inp}', {pop}) → ({ts}, '{push}')")
+            lines.append("")
+            lines.append(f"Stack ({len(stack)} symbols):")
+            text = "\n".join(lines)
+
+            if self._stack_table:
+                self._stack_table.setRowCount(len(stack))
+                for i, sym in enumerate(stack):
+                    item = QTableWidgetItem(sym)
+                    item.setTextAlignment(Qt.AlignCenter)
+                    self._stack_table.setItem(i, 0, item)
+
+            if self._workspace:
+                self._workspace.clear_highlights()
+                if state:
+                    self._workspace.set_state_highlight(state)
+
+        if step == total:
+            verdict = "ACCEPTED ✓" if self._accepted else "REJECTED ✗"
+            text += f"\n\nResult: {verdict}"
+
+        self._info.setPlainText(text)
+        self._prev_btn.setEnabled(step > 0)
+        self._next_btn.setEnabled(step < total)
+
+    def _prev_step(self):
+        if self._current_step > 0:
+            self._current_step -= 1
+            self._update_view()
+
+    def _next_step(self):
+        if self._current_step < len(self._trace) - 1:
+            self._current_step += 1
+            self._update_view()
+
+    def closeEvent(self, event):
+        if self._workspace:
+            self._workspace.clear_highlights()
+        super().closeEvent(event)
 
 
 ICONS_DIR = Path(__file__).resolve().parents[1] / "icons"
@@ -503,6 +699,7 @@ class MainWindow(QMainWindow):
         convert_btn = self._make_category_button("Convert", [
             ("To AFND Right", lambda: self._grammar_to_afnd_right(editor)),
             ("To AFND Left", lambda: self._grammar_to_afnd_left(editor)),
+            ("To PDA", lambda: self._grammar_to_pda(editor)),
         ])
 
         for b in (edit_btn, check_btn, combine_btn, convert_btn):
@@ -799,9 +996,30 @@ class MainWindow(QMainWindow):
 
         try:
             fa = FiniteAutomaton.readAutomaton(tmp_path)
+            is_dfa = fa.deterministicAutomaton()
+            initial = fa.getInitialState()
+            alphabet = fa.getAlphabetSymbols()
+
+            trace = [{"states": [initial] if is_dfa else [initial], "consumed": "", "remaining": word}]
+            current_states = [initial]
+
+            for i, ch in enumerate(word):
+                if is_dfa:
+                    next_states = fa._delta_star_symbol(current_states, ch)
+                else:
+                    next_states = fa._delta_star_symbol(current_states, ch)
+                trace.append({
+                    "states": next_states,
+                    "consumed": word[:i+1],
+                    "remaining": word[i+1:],
+                })
+                current_states = next_states
+
             accepted = fa.wordBelongs(word)
-            message = "The automaton accepts the string." if accepted else "The automaton rejects the string."
-            QMessageBox.information(self, "Check Word", message)
+
+            dlg = SimulationDialog(self, word, trace, accepted, is_dfa, kind="fa")
+            dlg.set_workspace(workspace)
+            dlg.exec()
         except Exception as e:
             QMessageBox.critical(self, "Check Word", f"Operation failed: {e}")
         finally:
@@ -1267,13 +1485,10 @@ class MainWindow(QMainWindow):
 
         try:
             automaton_stack = AutomatonStack.readAutomaton(tmp_path)
-            accepted = automaton_stack.checkBelonging(word)
-            message = (
-                "The stack automaton accepts the string."
-                if accepted
-                else "The stack automaton rejects the string."
-            )
-            QMessageBox.information(self, "Check Word", message)
+            trace, accepted = _compute_pda_trace(automaton_stack, word)
+            dlg = SimulationDialog(self, word, trace, accepted, True, kind="pda")
+            dlg.set_workspace(workspace)
+            dlg.exec()
         except Exception as e:
             QMessageBox.critical(self, "Check Word", f"Operation failed: {e}")
         finally:
@@ -1492,3 +1707,29 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "To AFND Left", "AFND created and loaded into FA page.")
         except Exception as e:
             QMessageBox.critical(self, "To AFND Left", f"Operation failed: {e}")
+
+    def _grammar_to_pda(self, editor: QPlainTextEdit) -> None:
+        g = self._grammar_from_editor(editor)
+        if g is None:
+            QMessageBox.warning(self, "To PDA", "No grammar.")
+            return
+        try:
+            pda = automatonGrammar(g)
+            tmp = NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
+            pda.writeAutomaton(tmp.name)
+            tmp_path = tmp.name
+            tmp.close()
+            with open(tmp_path, "r", encoding="utf-8") as f:
+                text = f.read()
+            ws = self.stack_page.findChild(WorkspaceCanvas)
+            if ws:
+                ws.load_automaton_text(text)
+            self.stack.setCurrentWidget(self.stack_page)
+            QMessageBox.information(self, "To PDA", "PDA created and loaded into Stack page.")
+        except Exception as e:
+            QMessageBox.critical(self, "To PDA", f"Operation failed: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
