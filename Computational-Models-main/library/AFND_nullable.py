@@ -75,13 +75,31 @@ class FiniteAutomatonNullable(FiniteAutomaton):
         
     def __delta_star_symbol(self, subset_states, symbol):
         """ Determine the states subset where we can moved with that symbol from the given states set. 
-        Then, make the clousure of that states subset """
+        Then, make the clousure of that states subset.
         
-        set_states_transition = super()._delta_star_symbol(subset_states, symbol)
+        FIX: the INPUT subset must also be closed before looking for the symbol
+        transition (delta*(B,a) = Cl(union_{q in Cl(B)} delta(q,a))). Without this,
+        an epsilon-move leaving the state(s) in B before reading "symbol" was
+        invisible, so e.g. the very first symbol of a word could never benefit
+        from an epsilon-transition out of the initial state. """
+        
+        clousure_subset_states = self.clousureStatesSet(subset_states)
+        
+        set_states_transition = super()._delta_star_symbol(clousure_subset_states, symbol)
        
         clousure_set_states_transition = self.clousureStatesSet(set_states_transition)
         
         return clousure_set_states_transition
+    
+    """ Public wrapper around the epsilon-aware delta* function for a single symbol,
+    for callers outside the class (such as the GUI) that need to step through a
+    word one symbol at a time while correctly respecting null (epsilon)
+    transitions. Kept separate from the mangled private method so it can be
+    called as fa.deltaStarSymbol(...) instead of relying on Python's name
+    mangling of double-underscore attributes. """
+    
+    def deltaStarSymbol(self, subset_states, symbol):
+        return self.__delta_star_symbol(subset_states, symbol)
     
      
     """ It determines the It determines the \delta^{*} function given a subset of states B and a word u.

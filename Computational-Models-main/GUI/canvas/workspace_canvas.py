@@ -712,11 +712,48 @@ class WorkspaceCanvas(QWidget):
         if not icon_path:
             return
 
+        # FIX: at most one state may be initial at a time. Demote any other
+        # circle currently marked initial/initial_final before promoting this
+        # one, instead of allowing several states to stay marked "initial"
+        # (previously only the alphabetically-first one was honored on
+        # export/save, and the rest silently lost their "initial" marking).
+        if state_type in ("initial", "initial_final"):
+            for other in self.findChildren(MovableCircle):
+                if other is circle:
+                    continue
+
+                other_type = getattr(other, "_state_type", "normal")
+                if other_type == "initial":
+                    demoted_type = "normal"
+                elif other_type == "initial_final":
+                    demoted_type = "final"
+                else:
+                    continue
+
+                demoted_icon_path = self._state_icon_paths.get(demoted_type)
+                if not demoted_icon_path:
+                    continue
+
+                other._icon_path = demoted_icon_path
+                other.set_state_type(demoted_type)
+                other.setPixmap(QIcon(demoted_icon_path).pixmap(other.width(), other.height()))
+                other.update()
+
         circle._icon_path = icon_path
         circle.set_state_type(state_type)
         circle.setPixmap(QIcon(icon_path).pixmap(circle.width(), circle.height()))
         circle.update()
         self.refresh_view()
+
+    def has_initial_state(self) -> bool:
+        """Returns True if at least one circle on the canvas is marked as
+        initial (or initial_final). Lets callers warn the user instead of
+        silently falling back to an arbitrary (alphabetically-first) state,
+        which is what happens downstream if no state is ever marked initial."""
+        for circle in self.findChildren(MovableCircle):
+            if getattr(circle, "_state_name", "") and getattr(circle, "_state_type", "normal") in ("initial", "initial_final"):
+                return True
+        return False
 
     def set_state_highlight(self, state_name: str, color: str = "#22c55e") -> None:
         for circle in self.findChildren(MovableCircle):

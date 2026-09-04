@@ -1,0 +1,362 @@
+================================================================================
+ INDICE DE EJEMPLOS - carpeta automatons/  (AutoSandbox)
+================================================================================
+
+Este fichero explica que fichero de esta carpeta usar para probar cada
+funcionalidad de la aplicacion, y que resultado deberias ver si todo
+funciona bien. Cada resultado indicado aqui ha sido comprobado a mano
+ejecutando directamente las funciones de library/ sobre estos mismos
+ficheros (no son solo suposiciones sobre lo que "deberia" pasar).
+
+CONVENIO DE NOMBRES
+--------------------
+  fa_...        -> Automatas finitos      (pagina "Finite Automaton")
+  pda_...       -> Automatas de pila      (pagina "Stack Automaton")
+  gramatica_... -> Gramaticas             (pagina "Grammar")
+
+El numero tras el prefijo es solo un orden sugerido de uso.
+
+EXCEPCION: "fa_08_ejemplos_expresiones_regulares.txt" NO es un automata.
+Es una lista de expresiones regulares en texto plano, pensada para
+copiar y pegar (no para abrir con "Open") en el dialogo de "Regex to FDA".
+Todos los demas ficheros se abren desde la aplicacion normalmente.
+
+En los apartados de "Combine" (Union, Intersection, Equivalent?,
+Concatenation) hacen falta DOS ficheros: uno se abre primero en el
+lienzo/editor (automata o gramatica "A") y el segundo se selecciona
+despues en el dialogo de "Select second..." que abre la propia funcion
+(automata o gramatica "B"). Lo indico en cada caso.
+
+
+================================================================================
+ 1. PAGINA "Finite Automaton"   (ficheros fa_...)
+================================================================================
+
+--- Edit ---
+
+Clean
+  Usa: fa_03_afnd_estado_inaccesible_y_muerto.txt
+  Tiene un estado inaccesible (q_inaccesible, no se llega a el desde q0) y
+  un estado sumidero/muerto (q_muerto, del que nunca se sale hacia un
+  estado final). Antes de limpiar hay 4 estados (q0, q1, q_muerto,
+  q_inaccesible); despues de limpiar quedan 2 (q0, q1), y el lenguaje
+  reconocido no cambia (por ejemplo "1" y "11" siguen aceptandose, "0" y
+  "01" se siguen rechazando).
+
+Determinize
+  Usa: fa_02_afnd_no_determinista_2_finales.txt
+  Es un AFND genuino (desde q0 hay mas de una transicion con el mismo
+  simbolo), asi que veras la determinizacion trabajar de verdad: antes
+  deterministicAutomaton() da False, despues de Determinize pasa a dar
+  True. De propina: fa_05 (mas abajo) sirve para determinizar un
+  automata CON transiciones epsilon.
+  Prueba tambien con: fa_01_afd_multiplo_de_3_unos.txt, que YA es
+  determinista -> la app debe avisar de que no hace falta determinizar
+  en vez de fallar o dar un resultado raro.
+
+Minimize
+  Usa: fa_04_afd_con_estados_equivalentes.txt
+  Tiene 3 estados (q0, q1, q2), de los cuales q1 y q2 son equivalentes
+  (indistinguibles). Al minimizar deberian fusionarse en un unico
+  estado, dejando el automata con 2 estados en vez de 3.
+
+Complement
+  Usa: fa_01_afd_multiplo_de_3_unos.txt
+  AFD simple y determinista (acepta cadenas de 0/1 cuyo numero de unos es
+  multiplo de 3). El complementario invierte la pertenencia: por ejemplo
+  "" y "111" (aceptadas por el original) pasan a RECHAZARSE, mientras que
+  "1" y "11" (rechazadas por el original) pasan a ACEPTARSE.
+
+Reverse
+  Usa: fa_01_afd_multiplo_de_3_unos.txt
+  Tiene exactamente un estado final (q0), que es el requisito de esta
+  funcion en la app. El resultado invertido sigue aceptando "" y "111" y
+  sigue rechazando "11".
+  Prueba tambien con: fa_02_afnd_no_determinista_2_finales.txt, que
+  tiene DOS estados finales a proposito -> aqui la app debe mostrar el
+  aviso "Reverse requires exactly one final state" en vez de fallar o
+  dar un resultado incorrecto.
+
+--- Convert ---
+
+Regular Expression
+  Usa: fa_01_afd_multiplo_de_3_unos.txt (o fa_06a, mas abajo)
+  Cualquier AFD simple sirve para ver la expresion regular equivalente.
+
+Regex to FDA
+  Usa: fa_08_ejemplos_expresiones_regulares.txt (COPIAR Y PEGAR, no abrir)
+  Trae varias expresiones de ejemplo, de mas simple a mas compleja, para
+  pegar directamente en el dialogo de esta funcion.
+
+To Right Grammar
+  Usa: fa_01_afd_multiplo_de_3_unos.txt
+  Sirve cualquier automata; este es el mas simple para revisar a mano
+  las reglas de la gramatica lineal por la derecha que se genera.
+
+To Left Grammar
+  Usa: fa_01_afd_multiplo_de_3_unos.txt
+  Igual que el anterior, pero para la gramatica lineal por la izquierda.
+
+--- Combine ---
+
+Union
+  Usa: fa_06a_afd_termina_en_1.txt (A, abrir primero) +
+       fa_06b_afd_ceros_pares.txt (B, elegir en el dialogo)
+  Mismo alfabeto {0,1}, lenguajes distintos y faciles de razonar
+  (A: termina en 1 | B: numero par de ceros). La union deberia aceptar
+  "1", "00", "010", "111" y "0110" (cada una cumple al menos una de las
+  dos condiciones), y rechazar "10" (no termina en 1 y tiene un cero,
+  numero impar).
+
+Intersection
+  Usa: fa_06a_afd_termina_en_1.txt (A) + fa_06b_afd_ceros_pares.txt (B)
+  Mismo par que Union. La interseccion solo acepta lo que cumple AMBAS
+  condiciones a la vez: acepta "1" y "0011", pero rechaza "00", "010",
+  "0110" y "01" (cada una incumple alguna de las dos condiciones).
+
+Equivalent?
+  Usa: fa_06a_afd_termina_en_1.txt (A) +
+       fa_07_afd_equivalente_a_06a.txt (B)
+  fa_07 reconoce el MISMO lenguaje que fa_06a pero con otros nombres de
+  estado y una estructura ligeramente distinta (3 estados en vez de 2):
+  la app debe decir que SI son equivalentes.
+
+--- Test ---
+
+Check Word
+  Usa: fa_01_afd_multiplo_de_3_unos.txt
+  Prueba "111" (True), "11" (False), "" (True: 0 es multiplo de 3).
+
+Analyze
+  Usa: fa_05_afnd_con_transiciones_epsilon.txt
+  Automata con transiciones epsilon que reconoce 0*1*2* (cualquier
+  cantidad de ceros, luego unos, luego doses, en ese orden). Al analizar
+  deberia salir: lenguaje NO vacio, lenguaje infinito, NO determinista.
+  Para probar palabras sueltas: "012", "0012" y "0011122" se aceptan;
+  "10", "20", "21" y "001102" se rechazan (rompen el orden 0*1*2*).
+
+
+================================================================================
+ 2. PAGINA "Stack Automaton"   (ficheros pda_...)
+================================================================================
+
+--- Edit ---
+
+Simplify
+  Usa: pda_04_con_estado_inaccesible.txt
+  Tiene un estado inaccesible (q_inaccesible) ademas de los 4 estados
+  utiles (q0..q3) del automata de a^n b^n. Antes de simplificar hay 5
+  estados; despues, 4 (q0, q1, q2, q3), y el lenguaje no cambia ("ab" y
+  "aabb" se siguen aceptando, "aab" se sigue rechazando).
+
+Complement (det.)
+  Usa: pda_01_anbn_deterministico_estados_finales.txt
+  Es determinista (isDeterministic() = True), asi que esta funcion puede
+  aplicarse sin problema.
+  Prueba tambien con: pda_03_palindromos_pares_no_determinista.txt, que
+  es NO determinista a proposito (isDeterministic() = False) -> aqui la
+  app debe avisar en vez de intentar complementar algo que no admite
+  complemento por este metodo.
+
+--- Convert ---
+
+To Grammar
+  Usa: pda_01_anbn_deterministico_estados_finales.txt
+  PDA de a^n b^n por estados finales; facil de comparar la gramatica
+  resultante con gramatica_01_anbn.txt a mano.
+
+To Final-State
+  Usa: pda_02_anbn_pila_vacia.txt
+  Acepta por PILA VACIA (la lista de estados finales esta vacia en el
+  fichero). Al convertir a estados finales, el automata resultante debe
+  seguir aceptando "ab" y "aabb", y rechazando "aab", "ba" y "".
+
+To Empty-Stack
+  Usa: pda_01_anbn_deterministico_estados_finales.txt
+  Acepta por ESTADOS FINALES. Al convertir a pila vacia, el resultado
+  debe seguir aceptando "ab" y "aabb", y rechazando "aab", "ba" y "".
+
+--- Combine ---
+
+Intersect with DFA
+  Usa: pda_05_0n1n_para_interseccion_con_dfa.txt (A, en el lienzo) +
+       fa_01_afd_multiplo_de_3_unos.txt (DFA, elegir en el dialogo)
+  pda_05 reconoce 0^n 1^n (n >= 1; OJO: la propia pda_05 rechaza la
+  palabra vacia). Al intersecar con "numero de unos multiplo de 3" el
+  resultado solo acepta 0^n 1^n cuando n es multiplo de 3: por ejemplo
+  "000111" (n=3) y "000000111111" (n=6) se aceptan; "01" (n=1), "0011"
+  (n=2) y "00001111" (n=4) se rechazan.
+
+--- Test ---
+
+Check Word
+  Usa: pda_01_anbn_deterministico_estados_finales.txt
+  Prueba "ab" (True), "aabb" (True), "aaabbb" (True), "aab" (False),
+  "ba" (False), "" (False), "a" (False).
+
+Analyze
+  Usa: pda_03_palindromos_pares_no_determinista.txt
+  Caso NO determinista con varias transiciones posibles desde el mismo
+  estado y simbolo de pila. Palabras de prueba: "aa", "bb", "abba" y
+  "baab" se aceptan (palindromos de longitud par); "ab", "abab" y
+  "aabb" se rechazan (no son palindromos, aunque tengan longitud par);
+  la palabra vacia "" tambien se acepta (palindromo trivial).
+
+
+================================================================================
+ 3. PAGINA "Grammar"   (ficheros gramatica_...)
+================================================================================
+
+--- Edit ---
+
+Simplify
+  Usa: gramatica_03_con_simbolos_inutiles.txt
+  Tiene 3 variables (S, X, Y) y 7 reglas; X e Y no contribuyen a generar
+  ninguna palabra util desde S. Tras simplificar deberian quedar solo la
+  variable S y 2 reglas.
+
+Chomsky
+  Usa: gramatica_01_anbn.txt (caso simple, para revisar la forma a mano)
+  Usa tambien: gramatica_02_parentesis_balanceados_con_epsilon.txt
+  Este segundo fichero es el caso especial: su lenguaje incluye la
+  palabra vacia, asi que la forma normal de Chomsky resultante conserva
+  UNA produccion epsilon para el simbolo inicial (la unica excepcion que
+  permite la forma normal de Chomsky). Tras transformar, CYK sobre la
+  palabra vacia debe seguir dando True.
+
+Greibach
+  Usa: gramatica_01_anbn.txt
+  Mismo ejemplo que para Chomsky, para poder comparar ambas formas
+  normales sobre la misma gramatica. wordBelongsGreibach("aabb") = True.
+
+--- Check ---
+
+CYK
+  Usa: gramatica_02_parentesis_balanceados_con_epsilon.txt
+  (La app aplica la transformacion de Chomsky automaticamente antes de
+  correr CYK). Prueba "" (True), "()" (True), "(())" (True), "()()"
+  (True), "(" (False), ")(" (False). Este fichero es precisamente el
+  caso limite de la palabra vacia tras Chomsky (ver nota de errores al
+  final de este documento).
+
+Earley
+  Usa: gramatica_07_expresiones_no_lineal.txt
+  Gramatica de expresiones aritmeticas (con +, *, parentesis, variables
+  a/b), no lineal por ninguno de los dos lados. Prueba "a+b*a" (True),
+  "(a+b)*a" (True), "a*b+a*(a+b)" (True), "a+" (False), "(a+b" (False).
+
+--- Combine ---
+
+Union
+  Usa: gramatica_04a_anbn.txt (A, abrir primero) +
+       gramatica_04b_bnan.txt (B, elegir en el dialogo)
+  Las dos usan la variable "S" A PROPOSITO: son el par pensado para
+  comprobar que la union no mezcla las reglas de ambas gramaticas por
+  compartir nombre de variable. Prueba "ab" y "ba" (True, una de cada
+  gramatica), "aabb" y "bbaa" (True), "abab" y "aa" (False: no
+  pertenecen a NINGUNA de las dos por separado).
+
+Concatenation
+  Usa: gramatica_04a_anbn.txt (A) + gramatica_04b_bnan.txt (B)
+  Mismo par. Prueba "abba" (True: "ab" de A seguido de "ba" de B) y
+  "aabbba" (True: "aabb" de A seguido de "ba" de B), "abab" y "ab"
+  (False).
+
+Closure
+  Usa: gramatica_04a_anbn.txt
+  Cierre de Kleene de a^n b^n. Prueba "" (True), "ab" (True), "abab"
+  (True), "aabbab" (True), "aab" (False, no es una concatenacion de
+  bloques a^n b^n completos).
+
+--- Convert ---
+
+To AFND Right
+  Usa: gramatica_05_lineal_derecha.txt
+  Gramatica lineal por la derecha genuina (linearRight() = True). Su
+  automata equivalente acepta "110", "1100", "1101" y "11001100", y
+  rechaza "11" y "011".
+
+To AFND Left
+  Usa: gramatica_06_lineal_izquierda.txt
+  Gramatica lineal por la izquierda genuina (linearLeft() = True,
+  S -> Sab | ab, es decir, el lenguaje (ab)+). Su automata equivalente
+  acepta "ab", "abab" y "ababab", y rechaza "aab", "aba" y "". Este
+  fichero fue el que revelo uno de los errores corregidos durante esta
+  sesion (ver nota al final de este documento).
+
+To PDA
+  Usa: gramatica_01_anbn.txt (caso simple)
+  Usa tambien: gramatica_07_expresiones_no_lineal.txt (caso mas rico,
+  con varias variables, para ver la conversion en un ejemplo menos
+  trivial que a^n b^n)
+
+
+================================================================================
+ 4. LISTA COMPLETA DE FICHEROS
+================================================================================
+
+fa_01_afd_multiplo_de_3_unos.txt              AFD, determinista, 1 final
+fa_02_afnd_no_determinista_2_finales.txt      AFND, 2 finales
+fa_03_afnd_estado_inaccesible_y_muerto.txt    tiene basura que limpiar
+fa_04_afd_con_estados_equivalentes.txt        tiene estados a fusionar
+fa_05_afnd_con_transiciones_epsilon.txt       con epsilon-transiciones
+fa_06a_afd_termina_en_1.txt                   para Union/Intersection (A)
+fa_06b_afd_ceros_pares.txt                    para Union/Intersection (B)
+fa_07_afd_equivalente_a_06a.txt               para Equivalent? (B de 06a)
+fa_08_ejemplos_expresiones_regulares.txt      TEXTO, copiar y pegar
+
+pda_01_anbn_deterministico_estados_finales.txt  determinista, acepta por estados finales
+pda_02_anbn_pila_vacia.txt                      determinista, acepta por pila vacia
+pda_03_palindromos_pares_no_determinista.txt    no determinista
+pda_04_con_estado_inaccesible.txt               tiene basura que simplificar
+pda_05_0n1n_para_interseccion_con_dfa.txt       para Intersect with DFA
+
+gramatica_01_anbn.txt                         CFG simple, no lineal
+gramatica_02_parentesis_balanceados_con_epsilon.txt  incluye palabra vacia
+gramatica_03_con_simbolos_inutiles.txt        tiene basura que simplificar
+gramatica_04a_anbn.txt                        para Union/Concat/Closure (A)
+gramatica_04b_bnan.txt                        para Union/Concat (B), usa "S"
+gramatica_05_lineal_derecha.txt               lineal por la derecha
+gramatica_06_lineal_izquierda.txt             lineal por la izquierda
+gramatica_07_expresiones_no_lineal.txt        CFG mas rica, no lineal
+
+
+================================================================================
+ 5. ERRORES ENCONTRADOS Y CORREGIDOS MIENTRAS PREPARABA ESTOS EJEMPLOS
+================================================================================
+
+Al diseñar y comprobar uno a uno estos ficheros contra tu libreria ya
+corregida aparecieron 3 errores NUEVOS que no estaban en el informe de
+correcciones que ya te entregue (Informe_Correcciones_AutoSandbox.docx).
+Los tres han quedado corregidos y comprobados con pruebas automaticas:
+
+1. CYK fallaba con un error (IndexError, la aplicacion se habria
+   cerrado o mostrado un fallo) al comprobar una palabra NO vacia en
+   una gramatica ya transformada a forma de Chomsky, siempre que esa
+   gramatica generase tambien la palabra vacia (como
+   gramatica_02_parentesis_balanceados_con_epsilon.txt).
+   Fichero: library/grammar.py, funcion checkBelongingCYK.
+
+2. Union y Concatenation de gramaticas mezclaban las reglas de las dos
+   gramaticas cuando ambas usaban el mismo nombre de variable
+   (tipicamente "S", el nombre por defecto que casi todo el mundo usa).
+   Esto podia dar lenguajes incorrectos sin avisar de nada. Los
+   ficheros gramatica_04a_anbn.txt y gramatica_04b_bnan.txt de este
+   mismo indice son precisamente el caso que lo demuestra.
+   Fichero: library/grammar.py, funciones unionGrammar y
+   concatenationGrammar.
+
+3. Reverse sobre un automata con transiciones epsilon "degradaba" el
+   resultado a un automata sin soporte de epsilon, dando resultados de
+   pertenencia incorrectos despues. Se detecto precisamente al
+   comprobar gramatica_06_lineal_izquierda.txt (su conversion "To AFND
+   Left" usa Reverse por dentro).
+   Fichero: library/AFND.py, funcion computeReverseAutomaton.
+
+Estos 3 errores ya estan corregidos en tu copia de library/ y cubiertos
+por nuevos tests automaticos en el script de pruebas que tienes en tu
+equipo, pero todavia NO estan documentados en el
+Informe_Correcciones_AutoSandbox.docx que ya tienes. Dile a Claude si
+quieres que actualice ese documento para incluirlos.
+
+================================================================================

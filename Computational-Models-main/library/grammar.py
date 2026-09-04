@@ -550,6 +550,21 @@ class GenerativeGrammar:
     the variable of the left part is nullable
     """
     
+    """Generates a variable name that does not already exist in the grammar,
+    based on `base`. Uses the codebase's own "<...>" convention for multi-
+    character variable names (see clausureGrammar/unionGrammar/etc.)."""
+    
+    def _freshVariable(self, base):
+        existing = set(self.__variable_symbols)
+        candidate = "<" + str(base) + "_0>"
+        counter = 1
+        
+        while candidate in existing:
+            candidate = "<" + str(base) + "_0_" + str(counter) + ">"
+            counter += 1
+        
+        return candidate
+    
     def computeNullableVariables(self):
         nullable_variables = []
         production_rules = self.getProductionRules()  
@@ -669,6 +684,25 @@ class GenerativeGrammar:
         for rule in rules_to_add:
             if rule not in self.__production_rules:
                 self.__production_rules.append(rule)
+        
+        """FIX: the standard construction allows exactly one null production to
+        survive, S0 -> epsilon, precisely when the ORIGINAL start symbol was
+        nullable (i.e. the language includes the empty word). Without this, the
+        loop above deletes that production too and the transformed grammar
+        silently stops generating the empty word even though the original
+        grammar did. A fresh start symbol keeps every other production
+        null-production-free, as Chomsky Normal Form requires. """
+        if self.__start_symbol in nullable_variables:
+            old_start_symbol = self.__start_symbol
+            new_start_symbol = self._freshVariable(old_start_symbol)
+            
+            self.__variable_symbols.append(new_start_symbol)
+            self.__production_rules.append(ProductionRule(new_start_symbol, [old_start_symbol]))
+            self.__production_rules.append(ProductionRule(new_start_symbol, []))
+            self.__start_symbol = new_start_symbol
+            
+            if verbose:
+                print("Adding the new start variable " + new_start_symbol + " to preserve the empty word")
        
     """It computes H = the set of pairs (A,B) such that B is derivable from A 
         Basic condition: if A-> B, then (A,B) belongs to H
@@ -1026,7 +1060,7 @@ class GenerativeGrammar:
         for i in range(num_variables): # for each i = 1...m
             for j in range(i): #f for each j = 1,,,i-1
                 k = 0
-                while k < num_production_rules:
+                while k < len(self.__production_rules):  # FIX: was a stale cached length
                     production_rule = self.__production_rules[k]
                     left_part = production_rule.getLeftPart()
                     right_part = production_rule.getRightPart()
@@ -1045,7 +1079,7 @@ class GenerativeGrammar:
             """ If there is a production of the form Ai -> Ai\alpha
              Delete Ai with the second operation """
             k = 0
-            while k < num_production_rules:
+            while k < len(self.__production_rules):  # FIX: was a stale cached length
                 production_rule = self.__production_rules[k]
                 left_part = production_rule.getLeftPart()
                 right_part = production_rule.getRightPart()
@@ -1069,7 +1103,7 @@ class GenerativeGrammar:
         for i in reversed(range(num_variables - 1)):
             for j in range(i+1, num_variables):
                 k = 0
-                while k < num_production_rules:
+                while k < len(self.__production_rules):  # FIX: was a stale cached length
                     production_rule = self.__production_rules[k]
                     left_part = production_rule.getLeftPart()
                     right_part = production_rule.getRightPart()
@@ -1090,7 +1124,7 @@ class GenerativeGrammar:
             for j in range(num_variables):
                 string_added = "<B" + self.__variable_symbols[j] + ">"
                 k = 0
-                while k < num_production_rules:
+                while k < len(self.__production_rules):  # FIX: was a stale cached length
                     production_rule = self.__production_rules[k]
                     left_part = production_rule.getLeftPart()
                     right_part = production_rule.getRightPart()
@@ -1110,6 +1144,11 @@ class GenerativeGrammar:
     """It transform the grammar into the Greibach normal form via the two parts described above """
     
     def transformGreibach(self, verbose = False):
+        
+        if not self.greibachAppliable(verbose):  # FIX: guarantee the precondition first
+            if verbose:
+                print("Normalizing to Chomsky Normal Form first so Greibach's preconditions hold")
+            self.transformChomsky(verbose)
         
         if verbose:
             print("Running the first part of the Greibach algorithm")
@@ -1210,39 +1249,83 @@ class GenerativeGrammar:
     The new grammar has the productions S -> S_1, S -> S_2, and the 
     productions of both grammars """
     
+    """ Renames whichever variables of second_grammar collide with a variable
+    name already used by self (very commonly "S", since it is the default
+    start-symbol name), so the two grammars' productions can be merged safely.
+    Without this, unionGrammar/concatenationGrammar silently fused the two
+    rule sets under the shared name, and the merged variable ended up
+    generating derivations that mix pieces of BOTH grammars -- not just their
+    union/concatenation. Returns (renamed_start_symbol, renamed_production_rules,
+    renamed_variable_symbols) for second_grammar; symbols that do not collide
+    are left untouched. """
+
+    def _renameCollidingVariables(self, second_grammar):
+        first_variables = list(self.__variable_symbols)
+        second_variables = list(second_grammar.getVariableSymbols())
+        reserved = set(first_variables) | set(second_variables)
+        rename_map = {}
+
+        for variable in second_variables:
+            if variable in first_variables:
+                candidate = "<" + str(variable) + "_2>"
+                counter = 1
+                while candidate in reserved:
+                    candidate = "<" + str(variable) + "_2_" + str(counter) + ">"
+                    counter += 1
+                rename_map[variable] = candidate
+                reserved.add(candidate)
+
+        def renamed(symbol):
+            return rename_map.get(symbol, symbol)
+
+        renamed_start_symbol = renamed(second_grammar.getInitialSymbol())
+        renamed_production_rules = [
+            ProductionRule(renamed(rule.getLeftPart()), [renamed(symbol) for symbol in rule.getRightPart()])
+            for rule in second_grammar.getProductionRules()
+        ]
+        renamed_variable_symbols = [renamed(variable) for variable in second_variables]
+
+        return renamed_start_symbol, renamed_production_rules, renamed_variable_symbols
+
     def unionGrammar(self, second_grammar):
         
         coincide_terminal_symbols = self.coincideTerminalSymbols(second_grammar)
             
         if  coincide_terminal_symbols: # It is necessary that both grammars have the same terminal symbols
             start_variable_union = "<S_u>"
+
+            # FIX: rename any variable of second_grammar that collides with one
+            # of self's (see _renameCollidingVariables) before merging, instead
+            # of silently fusing same-named variables from both grammars.
+            second_start_symbol, second_production_rules, second_variables = self._renameCollidingVariables(second_grammar)
+
             variables_union = [start_variable_union]
             
-            """Include the variables of both grammar in the variables of the union grammar
-            Remark that the variable of a grammar can not be included in the variables
-            of the other grammar. If this is not satisfies, raise error. """
-            
             for variable in self.__variable_symbols:
-                if variable not in second_grammar.getVariableSymbols():
+                if variable not in variables_union:
                     variables_union.append(variable)
                     
-            for variable in second_grammar.getVariableSymbols():
-                if variable not in self.__variable_symbols:
+            for variable in second_variables:
+                if variable not in variables_union:
                     variables_union.append(variable)
                     
             # Add the production rules. The first rules are S -> S_1, S-> S_2
             
             first_rule = ProductionRule(start_variable_union, [self.__start_symbol])
-            second_rule = ProductionRule(start_variable_union, [second_grammar.getInitialSymbol()])
+            second_rule = ProductionRule(start_variable_union, [second_start_symbol])
 
             # Add the productions of both grammars
 
-            production_rules_union = [first_rule, second_rule] + self.__production_rules + second_grammar.getProductionRules()
+            production_rules_union = [first_rule, second_rule] + self.__production_rules + second_production_rules
                  
             
             union_grammar = GenerativeGrammar(variables_union, self.__terminal_symbols,  start_variable_union, production_rules_union)
         
             return union_grammar
+        
+        else:  # FIX: was silently returning None with no message at all
+            print("Both grammars must have the same terminal symbols")
+            return None
         
         
     """ It makes the concatenation of the grammar with another grammar
@@ -1254,32 +1337,37 @@ class GenerativeGrammar:
             
         if  coincide_terminal_symbols: # It is necessary that both grammars have the same terminal symbols
             start_variable_concatenation = "<S_c>"
+
+            # FIX: same collision as unionGrammar -- rename second_grammar's
+            # colliding variables (typically "S") before merging.
+            second_start_symbol, second_production_rules, second_variables = self._renameCollidingVariables(second_grammar)
+
             variables_concatenation = [start_variable_concatenation]
             
-            """Include the variables of both grammar in the variables of the union grammar
-            Remark that the variable of a grammar can not be included in the variables
-            of the other grammar. If this is not satisfies, raise error. """
-            
             for variable in self.__variable_symbols:
-                if variable not in second_grammar.getVariableSymbols():
+                if variable not in variables_concatenation:
                     variables_concatenation.append(variable)
                     
-            for variable in second_grammar.getVariableSymbols():
-                if variable not in self.__variable_symbols:
+            for variable in second_variables:
+                if variable not in variables_concatenation:
                     variables_concatenation.append(variable)
                     
             # Add the production rules. The first rules are S -> S_1, S-> S_2
             
-            first_rule = ProductionRule(start_variable_concatenation, [self.__start_symbol, second_grammar.getInitialSymbol()])
+            first_rule = ProductionRule(start_variable_concatenation, [self.__start_symbol, second_start_symbol])
 
 
             # Add the productions of both grammars
 
-            production_rules_concatenation = [first_rule] + self.__production_rules + second_grammar.getProductionRules()
+            production_rules_concatenation = [first_rule] + self.__production_rules + second_production_rules
             
             concatenation_grammar = GenerativeGrammar(variables_concatenation, self.__terminal_symbols,  start_variable_concatenation, production_rules_concatenation)
         
             return concatenation_grammar
+        
+        else:  # FIX: was silently returning None with no message at all
+            print("Both grammars must have the same terminal symbols")
+            return None
     
     
     """ It makes the clausure of a grammar. The new grammar has the productions S_v->SS_v,   S_v -> \epsilon
@@ -1359,6 +1447,18 @@ class GenerativeGrammar:
     
     def checkBelongingCYK(self, word, verbose = False):
         start_symbol = self.getInitialSymbol()
+        
+        # FIX: the CYK table has no cell for a subchain of length 0, so trying
+        # to check the empty word crashed with IndexError. Handle it directly:
+        # the empty word is generated iff the start symbol is nullable.
+        if len(word) == 0:
+            belongs = start_symbol in self.computeNullableVariables()
+            
+            if verbose:
+                print("Checking the empty word: start symbol nullable = " + str(belongs))
+            
+            return belongs
+        
         variables_generate_subchain = []
         
         """ Determine V_i1 = {A | A->a is a production} and the i-th
@@ -1375,6 +1475,16 @@ class GenerativeGrammar:
             
             for production_rule in self.__production_rules:
                 right_part = production_rule.getRightPart()
+                
+                # FIX: a Chomsky-normal-form grammar may legitimately contain one
+                # epsilon production (right_part == []) for the start symbol, kept
+                # to preserve membership of the empty word (see deleteNullProductions).
+                # Indexing right_part[0] unconditionally crashed with IndexError as
+                # soon as this loop reached that production while checking any
+                # non-empty word. An epsilon production can never match a single
+                # input symbol here, so it is simply skipped.
+                if len(right_part) == 0:
+                    continue
                 
                 if right_part[0] == word[i]:  # If there production is unitary and the i-th symbol in in the right
                    left_part = production_rule.getLeftPart()

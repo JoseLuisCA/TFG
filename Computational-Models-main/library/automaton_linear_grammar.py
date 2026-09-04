@@ -115,6 +115,9 @@ def computeAssociatedAFNDLinearLeft(grammar):
             
         reverse_grammar = grammar.computeReverseGrammar()
         automaton_reverse_grammar = computeAssociatedAFNDLinearRight(reverse_grammar)
+        if automaton_reverse_grammar is None:
+            print("Could not build the automaton associated with the reversed grammar")
+            return None
         reverse_automaton_reverse_grammar =  automaton_reverse_grammar.computeReverseAutomaton()
             
         return reverse_automaton_reverse_grammar
@@ -137,11 +140,16 @@ def grammarLinearRight(automaton):
         
     for transition in transition_function:
         left_part = transition.getInitialState()
-        transition_state = transition.getFinalStates()[0]
-        right_part = [transition.getInputSymbol(), transition_state]
+        input_symbol = transition.getInputSymbol()
+        
+        # FIX: iterate over every target state of the transition (it can have
+        # more than one for a genuinely non-deterministic automaton), instead
+        # of silently keeping only getFinalStates()[0] and dropping the rest.
+        for transition_state in transition.getFinalStates():
+            right_part = [input_symbol, transition_state]
             
-        production_rule = ProductionRule(left_part, right_part)
-        production_rules.append(production_rule)
+            production_rule = ProductionRule(left_part, right_part)
+            production_rules.append(production_rule)
             
     final_states = automaton.getFinalStates()
                      
@@ -163,6 +171,13 @@ def grammarLinearRight(automaton):
     
 def grammarLinearLeft(automaton):
         automaton_linear_right = automaton.computeReverseAutomaton()
+        
+        # FIX: computeReverseAutomaton returns None when the automaton doesn't
+        # have exactly one final state; propagate that instead of crashing.
+        if automaton_linear_right is None:
+            print("The automaton must have a unique final state to compute the left-linear grammar")
+            return None
+        
         reverse_grammar = grammarLinearRight(automaton_linear_right)
         grammar_linear_left = reverse_grammar.computeReverseGrammar()
         

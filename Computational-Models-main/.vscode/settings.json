@@ -1,6 +1,4 @@
 {
-    "chat.tools.terminal.autoApprove": {
-        "C:/Users/JoseCadiar/Documents/TFG/Computational-Models-main/.venv/Scripts/python.exe": true,
-        "&": true
-    }
+  "python.defaultInterpreterPath": "C:\\venv-tfg\\Scripts\\python.exe",
+  "python.envFile": "${workspaceFolder}/.env"
 }

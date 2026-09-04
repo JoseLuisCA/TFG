@@ -640,6 +640,39 @@ class AutomatonStack:
         
         return belonging
     
+    """ Generates a stack symbol that is a single character, so it does not break the
+    convention (used throughout this class, e.g. checkBelonging and the transitions
+    built here) that each character of a push string represents one stack symbol.
+    The generated symbol is guaranteed not to already belong to existing_symbols. """
+
+    def __freshStackSymbol(self, existing_symbols):
+        candidate_pool = "#$%&@~^?!" + "ZYXWVUTSRQPONMLKJIHGFEDCBA" + "0123456789"
+        for candidate in candidate_pool:
+            if candidate not in existing_symbols:
+                return candidate
+
+        print("Warning: could not find a free single-character stack symbol; falling back to a multi-character name")
+        index = 0
+        while True:
+            candidate = "Z0n_" + str(index)
+            if candidate not in existing_symbols:
+                return candidate
+            index += 1
+
+    """ Generates a state name starting from base that does not collide with any
+    state already in existing_states. """
+
+    def __freshStateName(self, base, existing_states):
+        if base not in existing_states:
+            return base
+
+        index = 2
+        while True:
+            candidate = base + "_" + str(index)
+            if candidate not in existing_states:
+                return candidate
+            index += 1
+
     """ It computes the automaton that accepts the same languaje as the initial one 
     via the criterion of final states. """ 
     
@@ -658,18 +691,24 @@ class AutomatonStack:
         
         """Add two new states: q0n and qf. q0n is the new initial state and qf is a new final state. """
         
-        new_initial_state = "q0n"
-        new_final_state = "qf"
+        new_initial_state = self.__freshStateName("q0n", states_set)
+        new_final_state = self.__freshStateName("qf", states_set + [new_initial_state])
 
         final_states_set = self.getFinalStates()
         
         new_states_set = states_set + [new_initial_state, new_final_state]
         new_final_states_set = final_states_set + [new_final_state]
         
-        """ Add a new symbol to the stack alphabet: Z0n. It is the new initial stack symbol. """
+        """ Add a new symbol to the stack alphabet. It is the new initial stack symbol.
+        FIX: this must be a single, fresh character -- see __freshStackSymbol -- otherwise
+        concatenating it with the original initial stack symbol below (to build a
+        two-symbol push string) produces an ambiguous multi-character push string that
+        gets silently mis-split into the wrong stack symbols wherever push strings are
+        read one character at a time (checkBelonging, the PDA<->grammar conversion, the
+        GUI trace), corrupting the resulting automaton/grammar. """
         
         stack_alphabet = self.getStackSymbols()
-        new_initial_stack_symbol = "Z0n"
+        new_initial_stack_symbol = self.__freshStackSymbol(stack_alphabet)
         new_stack_alphabet = stack_alphabet + [new_initial_stack_symbol]
         
         transitions = self.getTransitions()
@@ -715,17 +754,23 @@ class AutomatonStack:
         """Add two new states: q0n and qs. q0n is the new initial state. There are no final 
         states in the new automaton. """
         
-        new_initial_state = "q0n"
-        new_state = "qs"
+        new_initial_state = self.__freshStateName("q0n", states_set)
+        new_state = self.__freshStateName("qs", states_set + [new_initial_state])
         
         new_states_set = states_set + [new_initial_state,new_state]
         
         new_final_states_set = []
         
-        """ Add a new symbol to the stack alphabet: Z0n. It is the new initial stack symbol. """
+        """ Add a new symbol to the stack alphabet. It is the new initial stack symbol.
+        FIX: this must be a single, fresh character -- see __freshStackSymbol -- otherwise
+        concatenating it with the original initial stack symbol below (to build a
+        two-symbol push string) produces an ambiguous multi-character push string that
+        gets silently mis-split into the wrong stack symbols wherever push strings are
+        read one character at a time (checkBelonging, the PDA<->grammar conversion, the
+        GUI trace), corrupting the resulting automaton/grammar. """
         
         stack_alphabet = self.getStackSymbols()
-        new_initial_stack_symbol = "Z0n"
+        new_initial_stack_symbol = self.__freshStackSymbol(stack_alphabet)
         new_stack_alphabet = stack_alphabet + [new_initial_stack_symbol]
                 
         transitions = self.getTransitions()
@@ -831,6 +876,7 @@ class AutomatonStack:
     def complementaryDeterministic(self):
         if not self.isDeterministic():
             print("The automaton must be deterministic")
+            return None  # FIX: was falling through to UnboundLocalError
             
         else:            
             states_set = self.getStatesSet()
@@ -1089,8 +1135,9 @@ class AutomatonStack:
         input_symbols = self.getAlphabetSymbols()
         input_symbols_DFA = deterministic_finite_automaton.getAlphabetSymbols()
         
-        if not input_symbols == input_symbols_DFA:
+        if not set(input_symbols) == set(input_symbols_DFA):  # FIX: order-insensitive comparison
             print("Both automatons must have the same input alphabet")
+            return None  # FIX: was falling through to UnboundLocalError
                
         else:
             states_stack_automaton = self.getStatesSet()
@@ -1174,11 +1221,14 @@ class AutomatonStack:
                                         i = i+1
                                 
                                 """ Add the transition tuples \delta''((p,q), a, X) = ((r,s), \alpha), 
-                                for each (r,\alpha) = \delta(p,a,X). """
+                                for each (r,\alpha) = \delta(p,a,X). FIX: only if the DFA actually has
+                                a transition for (state_DFA, symbol) -- an incomplete DFA used to crash
+                                here with UnboundLocalError instead of just not adding a transition. """
                                 
-                                new_transition_tuples = self.__makeTransitionTuples(transition_symbol_tuples,transition_state_DFA)
-                                new_transition = TransitionAutomatonStack(pair_states_initial, symbol, stack_symbol, new_transition_tuples)
-                                transitions_intersection.append(new_transition)
+                                if transition_state_DFA_found:
+                                    new_transition_tuples = self.__makeTransitionTuples(transition_symbol_tuples,transition_state_DFA)
+                                    new_transition = TransitionAutomatonStack(pair_states_initial, symbol, stack_symbol, new_transition_tuples)
+                                    transitions_intersection.append(new_transition)
 
         intersection_automaton = AutomatonStack(states_intersection, input_symbols, stack_symbols, transitions_intersection, initial_state_intersection, final_states_intersection, initial_symbol_stack)
         

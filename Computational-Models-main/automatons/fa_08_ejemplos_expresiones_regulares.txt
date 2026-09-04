@@ -1,0 +1,13 @@
+Ejemplos de expresiones regulares para "Convert > Regex to FDA"
+==============================================================
+Este fichero NO se abre con Open: es una lista para copiar y pegar el
+texto de la expresion en el dialogo de "Regex to FDA".
+
+Sintaxis: + es union, * es clausura de Kleene, los simbolos escritos
+seguidos se concatenan, y los parentesis agrupan.
+
+(0+10)*001
+a*b*
+(a+b)*abb
+0(0+1)*1
+(01)*

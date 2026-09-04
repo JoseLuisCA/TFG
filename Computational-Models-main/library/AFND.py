@@ -419,6 +419,7 @@ class FiniteAutomaton:
         transitions = self.getTransitionFunction()
         transition_found = False
         num_transitions = len(transitions)
+        state_transition = None  # FIX: well-defined default instead of UnboundLocalError
         i = 0
         
         while i < num_transitions and not transition_found:
@@ -686,6 +687,13 @@ class FiniteAutomaton:
         
     def productAutomaton(self, second_automaton, union): 
          alphabet_symbols = self.getAlphabetSymbols()
+
+         """ FIX: both automatons must share the same input alphabet for the
+         product construction to make sense; fail with a clear, explicit None
+         instead of silently using only self's alphabet and crashing later. """
+         if set(alphabet_symbols) != set(second_automaton.getAlphabetSymbols()):
+             print("Both automatons must have the same input alphabet")
+             return None
 
          
          """ Firstly, we transform both automatons to deterministic """
@@ -1235,6 +1243,7 @@ class FiniteAutomaton:
         
         if len(final_states) > 1:
             print("There must be a unique final state")
+            return None  # FIX: explicit contract instead of relying on implicit fall-through
         
         else:
             #Change the initial and final states
@@ -1256,7 +1265,17 @@ class FiniteAutomaton:
            
                 reverse_transitions.append(reverse_transition)
     
-            reverse_automaton = FiniteAutomaton(states_set, alphabet_symbols, reverse_transitions, new_initial_state, new_set_final_states)
+            # FIX: use type(self) instead of the hardcoded FiniteAutomaton class, so
+            # reversing a FiniteAutomatonNullable (an automaton with real epsilon
+            # transitions) returns another FiniteAutomatonNullable. The reversed
+            # transitions can still be epsilon-labeled (reversing a transition does
+            # not remove its symbol), so returning the plain base class here silently
+            # downgraded the result: its wordBelongs() no longer applied epsilon-
+            # closure at all, giving wrong answers for words that legitimately relied
+            # on an epsilon move (this is exactly what computeAssociatedAFNDLinearLeft
+            # hits internally, since it reverses an automaton built with epsilon
+            # transitions by construction).
+            reverse_automaton = type(self)(states_set, alphabet_symbols, reverse_transitions, new_initial_state, new_set_final_states)
             
             return reverse_automaton
     

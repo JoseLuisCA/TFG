@@ -29,6 +29,7 @@ from tempfile import NamedTemporaryFile
 import os
 
 from library.AFND import FiniteAutomaton
+from library.AFND_nullable import FiniteAutomatonNullable
 from library.AFD_to_reg import dfaToRegex
 from library.reg_to_AFND import regexToAutomaton
 from library.automatonStack import AutomatonStack
@@ -38,68 +39,93 @@ from library.automaton_linear_grammar import grammarLinearRight, grammarLinearLe
 from PySide6.QtWidgets import QDialog, QGridLayout, QDialogButtonBox, QTextEdit, QTableWidget, QTableWidgetItem, QHeaderView
 
 
-def _compute_pda_trace(automaton_stack, word):
-    """Returns (trace, accepted). Walks forward greedily recording every step;
-    if stuck the trace ends at the stuck configuration."""
-    state = automaton_stack.getInitialState()
-    remaining = word
-    stack = [automaton_stack.getInitialSymbolStack()]
+def _compute_pda_trace(automaton_stack, word, max_configurations=200000):
+    """Returns (trace, accepted). Performs an EXHAUSTIVE backtracking search of
+    the PDA's computations -- the same algorithmic approach as the library's
+    own (correct) AutomatonStack.checkBelonging -- instead of greedily
+    following only the first matching transition at each step.
+
+    FIX: the previous greedy, single-path version could report REJECTED for a
+    word that a genuinely non-deterministic PDA actually accepts via a
+    different choice of transition, because it never backtracked when a
+    greedy choice ran into a dead end. This version explores every choice and
+    returns an actual accepting computation whenever one exists, so the
+    step-by-step trace shown to the student matches what checkBelonging would
+    say. A `visited` memo (state, remaining input, stack) both prevents
+    infinite loops on unproductive epsilon-cycles and avoids re-exploring a
+    configuration that has already been shown not to lead to acceptance.
+    `max_configurations` bounds the search as a safety net against
+    pathological inputs; it is not expected to be hit by ordinary examples.
+    """
     transitions = automaton_stack.getTransitions()
     final_states = automaton_stack.getFinalStates()
+    initial_state = automaton_stack.getInitialState()
+    initial_stack = [automaton_stack.getInitialSymbolStack()]
+
     visited = set()
+    budget = [max_configurations]
+    last_path = []
 
-    trace = []
+    def search(state, remaining, stack, path):
+        last_path[:] = path
 
-    while True:
-        # Check acceptance at current config
         if len(remaining) == 0 and (state in final_states or len(stack) == 0):
-            trace.append({"state": state, "remaining": "", "stack": [], "transition": None})
-            return trace, True
+            accepting_step = {"state": state, "remaining": "", "stack": list(stack), "transition": None}
+            return path + [accepting_step]
 
-        top = stack[-1] if stack else ""
         if not stack:
-            break
+            return None
 
         key = (state, remaining, tuple(stack))
         if key in visited:
-            break
+            return None
         visited.add(key)
 
-        chosen = None
+        budget[0] -= 1
+        if budget[0] <= 0:
+            return None
+
+        top = stack[-1]
+
         for t in transitions:
             if t.getInitialState() != state or t.getInitialTop() != top:
                 continue
             inp = t.getInputSymbol()
             if inp != "" and (len(remaining) == 0 or inp != remaining[0]):
                 continue
+
             for target_state, push_str in t.getTransitionTuples():
-                chosen = (t, target_state, push_str, inp)
-                break
-            if chosen:
-                break
+                new_stack = stack[:-1]
+                if push_str:
+                    for ch in reversed(push_str):
+                        new_stack.append(ch)
+                new_remaining = remaining if inp == "" else remaining[1:]
 
-        if chosen is None:
-            break
+                step = {
+                    "state": state,
+                    "remaining": remaining,
+                    "stack": list(stack),
+                    "transition": (state, inp, top, target_state, push_str),
+                }
 
-        t, target_state, push_str, inp = chosen
-        new_stack = stack.copy()
-        new_stack.pop()
-        if push_str:
-            for ch in reversed(push_str):
-                new_stack.append(ch)
-        new_remaining = remaining if inp == "" else remaining[1:]
+                result = search(target_state, new_remaining, new_stack, path + [step])
+                if result is not None:
+                    return result
 
-        trace.append({
-            "state": state,
-            "remaining": remaining,
-            "stack": list(stack),
-            "transition": (state, inp, top, target_state, push_str),
-        })
-        state, remaining, stack = target_state, new_remaining, new_stack
+        return None
 
-    # Rejected — append stuck config
-    trace.append({"state": state, "remaining": remaining, "stack": list(stack), "transition": None})
-    return trace, False
+    accepting_trace = search(initial_state, word, initial_stack, [])
+
+    if accepting_trace is not None:
+        return accepting_trace, True
+
+    # Rejected: show the last computation path explored (a real, concrete
+    # attempted path) ending at its stuck configuration, for display purposes.
+    if last_path:
+        return last_path, False
+
+    stuck_step = {"state": initial_state, "remaining": word, "stack": list(initial_stack), "transition": None}
+    return [stuck_step], False
 
 
 class SimulationDialog(QDialog):
@@ -724,6 +750,17 @@ class MainWindow(QMainWindow):
             button.setStyleSheet(self._tool_button_style)
 
     def _save_finite_automaton(self, workspace: WorkspaceCanvas) -> None:
+        if not workspace.has_initial_state():
+            QMessageBox.warning(
+                self,
+                "Guardar automata",
+                "No hay ningun estado marcado como inicial. "
+                "Marca un estado como inicial antes de guardar: "
+                "el fichero no indica cual es el estado inicial y, "
+                "al volver a abrirlo, se tomaria uno cualquiera por defecto.",
+            )
+            return
+
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Guardar automata",
@@ -840,7 +877,7 @@ class MainWindow(QMainWindow):
             tmp_path = tmp.name
 
         try:
-            fa = FiniteAutomaton.readAutomaton(tmp_path)
+            fa = FiniteAutomatonNullable.readAutomaton(tmp_path)
             fa.deleteInaccessibleStates()
             fa.deleteErrorStates()
             self._write_tmp_and_load(workspace, fa)
@@ -886,7 +923,7 @@ class MainWindow(QMainWindow):
             tmp_path = tmp.name
 
         try:
-            fa = FiniteAutomaton.readAutomaton(tmp_path)
+            fa = FiniteAutomatonNullable.readAutomaton(tmp_path)
             minimal = fa.minimalAutomaton()
             self._write_tmp_and_load(workspace, minimal)
             QMessageBox.information(self, "Minimize", "Automaton minimized.")
@@ -909,7 +946,7 @@ class MainWindow(QMainWindow):
             tmp_path = tmp.name
 
         try:
-            fa = FiniteAutomaton.readAutomaton(tmp_path)
+            fa = FiniteAutomatonNullable.readAutomaton(tmp_path)
             regex_source = fa.transformDeterministic()
             regular_expression = dfaToRegex(regex_source)
 
@@ -945,7 +982,7 @@ class MainWindow(QMainWindow):
         label = QLabel("Enter a regular expression:")
         edit = QLineEdit()
         checkbox = QCheckBox("Determinize and minimize (may be slow for large regexes)")
-        checkbox.setChecked(False)
+        checkbox.setChecked(True)  # FIX: default to the safer, immediately-usable DFA output
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(dlg.accept)
@@ -995,25 +1032,26 @@ class MainWindow(QMainWindow):
             tmp_path = tmp.name
 
         try:
-            fa = FiniteAutomaton.readAutomaton(tmp_path)
+            fa = FiniteAutomatonNullable.readAutomaton(tmp_path)
             is_dfa = fa.deterministicAutomaton()
             initial = fa.getInitialState()
             alphabet = fa.getAlphabetSymbols()
 
-            trace = [{"states": [initial] if is_dfa else [initial], "consumed": "", "remaining": word}]
-            current_states = [initial]
+            # FIX: step through the word using the epsilon-aware public
+            # delta* (fa.deltaStarSymbol), not the raw base-class
+            # fa._delta_star_symbol, which ignores null transitions entirely.
+            # The very first displayed state set is also the epsilon-closure
+            # of the initial state, matching delta*({q0}, epsilon) = Cl({q0}).
+            current_states = fa.clousureStatesSet([initial])
+            trace = [{"states": current_states, "consumed": "", "remaining": word}]
 
             for i, ch in enumerate(word):
-                if is_dfa:
-                    next_states = fa._delta_star_symbol(current_states, ch)
-                else:
-                    next_states = fa._delta_star_symbol(current_states, ch)
+                current_states = fa.deltaStarSymbol(current_states, ch)
                 trace.append({
-                    "states": next_states,
+                    "states": current_states,
                     "consumed": word[:i+1],
                     "remaining": word[i+1:],
                 })
-                current_states = next_states
 
             accepted = fa.wordBelongs(word)
 
@@ -1039,10 +1077,10 @@ class MainWindow(QMainWindow):
             tmp_path = tmp.name
 
         try:
-            fa = FiniteAutomaton.readAutomaton(tmp_path)
-            fa_for_empty = FiniteAutomaton.readAutomaton(tmp_path)
-            fa_for_infinite = FiniteAutomaton.readAutomaton(tmp_path)
-            fa_for_deterministic = FiniteAutomaton.readAutomaton(tmp_path)
+            fa = FiniteAutomatonNullable.readAutomaton(tmp_path)
+            fa_for_empty = FiniteAutomatonNullable.readAutomaton(tmp_path)
+            fa_for_infinite = FiniteAutomatonNullable.readAutomaton(tmp_path)
+            fa_for_deterministic = FiniteAutomatonNullable.readAutomaton(tmp_path)
 
             is_empty = fa_for_empty.emptyLanguaje()
             is_infinite = fa_for_infinite.infiniteLanguaje()
@@ -1080,7 +1118,7 @@ class MainWindow(QMainWindow):
         tmp_path = tmp.name
         tmp.close()
         try:
-            fa = FiniteAutomaton.readAutomaton(tmp_path)
+            fa = FiniteAutomatonNullable.readAutomaton(tmp_path)
             return fa, tmp_path
         except Exception:
             try:
@@ -1098,7 +1136,7 @@ class MainWindow(QMainWindow):
         if not path:
             return None
         try:
-            return FiniteAutomaton.readAutomaton(path)
+            return FiniteAutomatonNullable.readAutomaton(path)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load second automaton: {e}")
             return None
@@ -1171,6 +1209,9 @@ class MainWindow(QMainWindow):
             return
         try:
             result = fa_a.unionAutomaton(fa_b)
+            if result is None:
+                QMessageBox.warning(self, "Union", "Both automata must have the same input alphabet.")
+                return
             self._write_tmp_and_load(workspace, result)
             QMessageBox.information(self, "Union", "Union computed.")
         except Exception as e:
@@ -1191,6 +1232,9 @@ class MainWindow(QMainWindow):
             return
         try:
             result = fa_a.intersectionAutomaton(fa_b)
+            if result is None:
+                QMessageBox.warning(self, "Intersection", "Both automata must have the same input alphabet.")
+                return
             self._write_tmp_and_load(workspace, result)
             QMessageBox.information(self, "Intersection", "Intersection computed.")
         except Exception as e:
@@ -1244,6 +1288,9 @@ class MainWindow(QMainWindow):
             return
         try:
             grammar = grammarLinearLeft(fa)
+            if grammar is None:
+                QMessageBox.warning(self, "To Left Grammar", "The automaton must have exactly one final state.")
+                return
             self._show_grammar_dialog("Left-Linear Grammar", grammar)
         except Exception as e:
             QMessageBox.critical(self, "To Left Grammar", f"Operation failed: {e}")
@@ -1442,7 +1489,7 @@ class MainWindow(QMainWindow):
 
         try:
             pda = AutomatonStack.readAutomaton(tmp_path)
-            dfa = FiniteAutomaton.readAutomaton(dfa_path)
+            dfa = FiniteAutomatonNullable.readAutomaton(dfa_path)
             result = pda.intersectionFiniteAutomaton(dfa)
             if result is None:
                 QMessageBox.warning(self, "Intersect with DFA", "Intersection failed. Check alphabet compatibility.")
@@ -1642,6 +1689,9 @@ class MainWindow(QMainWindow):
         try:
             g2 = GenerativeGrammar.readGrammar(path)
             result = g.unionGrammar(g2)
+            if result is None:
+                QMessageBox.warning(self, "Union", "Both grammars must have the same terminal symbols.")
+                return
             editor.setPlainText(self._grammar_to_text(result))
             QMessageBox.information(self, "Union", "Union computed.")
         except Exception as e:
@@ -1661,6 +1711,9 @@ class MainWindow(QMainWindow):
         try:
             g2 = GenerativeGrammar.readGrammar(path)
             result = g.concatenationGrammar(g2)
+            if result is None:
+                QMessageBox.warning(self, "Concatenation", "Both grammars must have the same terminal symbols.")
+                return
             editor.setPlainText(self._grammar_to_text(result))
             QMessageBox.information(self, "Concatenation", "Concatenation computed.")
         except Exception as e:
@@ -1685,6 +1738,9 @@ class MainWindow(QMainWindow):
             return
         try:
             fa = computeAssociatedAFNDLinearRight(g)
+            if fa is None:
+                QMessageBox.warning(self, "To AFND Right", "The grammar must be linear by the right.")
+                return
             ws = self.fa_page.findChild(WorkspaceCanvas)
             if ws:
                 self._write_tmp_and_load(ws, fa)
@@ -1700,6 +1756,9 @@ class MainWindow(QMainWindow):
             return
         try:
             fa = computeAssociatedAFNDLinearLeft(g)
+            if fa is None:
+                QMessageBox.warning(self, "To AFND Left", "The grammar must be linear by the left.")
+                return
             ws = self.fa_page.findChild(WorkspaceCanvas)
             if ws:
                 self._write_tmp_and_load(ws, fa)

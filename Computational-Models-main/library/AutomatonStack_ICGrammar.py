@@ -78,7 +78,7 @@ and the list of symbols of the remaining top. """
 
 def computeRightPartsTransition(states_automaton, transition_state, partial_current_variable, current_right_part, remaining_top):
     next_remaining_top = remaining_top.copy()
-    top_symbol = next_remaining_top.pop()
+    top_symbol = next_remaining_top.pop(0)  # FIX: process D1 (new top of stack) first, not Dm
     
     """ Base case: the remaining top is composed of a unique symbol:
         add the top and the transition state to the current variable, such a variable to the current 
@@ -137,7 +137,13 @@ def grammarAutomatonStack(automaton_stack):
     "For each state q, add a production rule of the form S -> [q0,Z0,q]"
     
     initial_state = automaton_empty_stack.getInitialState()
-    initial_symbol_stack = automaton_stack.getInitialSymbolStack()
+    # FIX: must read the initial stack symbol from automaton_empty_stack (the automaton
+    # actually used to build the transitions below), not from the original automaton_stack.
+    # When the automaton needed an actual empty-stack conversion, its real initial state
+    # (the new "bridge" state) never has the ORIGINAL initial stack symbol on top -- only
+    # the NEW initial stack symbol does -- so using the old symbol here made S -> [q0,Z0,q]
+    # unreachable for every q, and the whole grammar generated the empty language.
+    initial_symbol_stack = automaton_empty_stack.getInitialSymbolStack()
     
     for state in states_set:
         variable_right_part = "<[" + initial_state + "," + initial_symbol_stack + "," + state + "]>"
@@ -165,7 +171,7 @@ def grammarAutomatonStack(automaton_stack):
             
             if len(transition_tuple[1]) == 0: # case (p,\epsilon) \in \delta(q,a,C)
                 left_part = "<[" + initial_state_transition + "," + initial_top + "," + transition_tuple[0] + "]>"
-                right_part = [input_symbol]
+                right_part = [input_symbol] if input_symbol else []  # FIX: empty input -> proper null production
                 production_rule = ProductionRule(left_part, right_part)
                 production_rules.append(production_rule)
                 
@@ -174,7 +180,15 @@ def grammarAutomatonStack(automaton_stack):
                 
                 for state in states_set:
                     left_part = "<[" + initial_state_transition + "," + initial_top + "," + state + "]>"
-                    current_right_part = [input_symbol]
+                    # FIX: same issue as the branch above -- an epsilon-labeled transition
+                    # (input_symbol == "") must contribute NO symbol to the right part, not
+                    # a literal "" element mixed in with the variables that follow. Leaving
+                    # a stray "" in the list makes checkBelongingCYK/checkBelongingEarly/
+                    # wordBelongsGreibach fail to match this position against anything,
+                    # so the production could never be used even though it is the very
+                    # first step of every derivation coming out of an empty-stack-converted
+                    # automaton (all of its "bridge" transitions are epsilon-labeled).
+                    current_right_part = [input_symbol] if input_symbol else []
                     
                     """ Put the symbols of the new top into a list. """
                     

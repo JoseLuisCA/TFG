@@ -1,0 +1,12 @@
+Q = {q0,q1,q_muerto,q_inaccesible}
+A = {0,1}
+F = {q1}
+
+(q0,0) -> {q_muerto}
+(q0,1) -> {q1}
+(q1,0) -> {q1}
+(q1,1) -> {q1}
+(q_muerto,0) -> {q_muerto}
+(q_muerto,1) -> {q_muerto}
+(q_inaccesible,0) -> {q1}
+(q_inaccesible,1) -> {q_muerto}
