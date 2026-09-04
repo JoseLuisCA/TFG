@@ -1,5 +1,0 @@
-V = {S,A}
-T = {a,b}
-
-S -> aA
-A -> aA|bA|b
